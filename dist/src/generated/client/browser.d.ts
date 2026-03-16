@@ -1,0 +1,10 @@
+import * as Prisma from './internal/prismaNamespaceBrowser.js';
+export { Prisma };
+export * as $Enums from './enums.js';
+export * from './enums.js';
+export type Sitter = Prisma.SitterModel;
+export type MessageThread = Prisma.MessageThreadModel;
+export type OwnerProfile = Prisma.OwnerProfileModel;
+export type Pet = Prisma.PetModel;
+export type Badge = Prisma.BadgeModel;
+export type Review = Prisma.ReviewModel;

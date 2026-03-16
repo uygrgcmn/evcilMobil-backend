@@ -1,0 +1,136 @@
+import type { AuthenticatedUser } from '../auth/auth.types';
+import { ListingsService } from './listings.service';
+export declare class ListingsController {
+    private readonly listingsService;
+    constructor(listingsService: ListingsService);
+    private parseIncludeDemo;
+    mine(user: AuthenticatedUser): Promise<{
+        publishedByUser: {
+            id: string;
+            role: import(".prisma/client").UserRole;
+            email: string;
+        };
+        latitude: number | null;
+        longitude: number | null;
+        locationAccuracy: number | null;
+        locationLastSharedAt: Date | null;
+        id: string;
+        title: string;
+        description: string;
+        listingType: import(".prisma/client").ListingType;
+        city: string;
+        district: string;
+        budgetPerDay: number | null;
+        servicePricePerDay: number | null;
+        serviceUnit: string | null;
+        serviceIcon: string | null;
+        isFeatured: boolean;
+        isActive: boolean;
+        createdAt: Date;
+        updatedAt: Date;
+    }[]>;
+    featured(forRole?: string, includeDemo?: string): Promise<{
+        publishedByUser: {
+            id: string;
+            role: import(".prisma/client").UserRole;
+            email: string;
+        };
+        latitude: number | null;
+        longitude: number | null;
+        locationAccuracy: number | null;
+        locationLastSharedAt: Date | null;
+        id: string;
+        title: string;
+        description: string;
+        listingType: import(".prisma/client").ListingType;
+        city: string;
+        district: string;
+        budgetPerDay: number | null;
+        servicePricePerDay: number | null;
+        serviceUnit: string | null;
+        serviceIcon: string | null;
+        isFeatured: boolean;
+        isActive: boolean;
+        createdAt: Date;
+        updatedAt: Date;
+    }[]>;
+    nearby(forRole?: string, city?: string, district?: string, includeDemo?: string): Promise<{
+        publishedByUser: {
+            id: string;
+            role: import(".prisma/client").UserRole;
+            email: string;
+        };
+        latitude: number | null;
+        longitude: number | null;
+        locationAccuracy: number | null;
+        locationLastSharedAt: Date | null;
+        id: string;
+        title: string;
+        description: string;
+        listingType: import(".prisma/client").ListingType;
+        city: string;
+        district: string;
+        budgetPerDay: number | null;
+        servicePricePerDay: number | null;
+        serviceUnit: string | null;
+        serviceIcon: string | null;
+        isFeatured: boolean;
+        isActive: boolean;
+        createdAt: Date;
+        updatedAt: Date;
+    }[]>;
+    findOne(id: string, forRole?: string, includeDemo?: string): Promise<{
+        publishedByUser: {
+            id: string;
+            role: import(".prisma/client").UserRole;
+            email: string;
+        };
+        latitude: number | null;
+        longitude: number | null;
+        locationAccuracy: number | null;
+        locationLastSharedAt: Date | null;
+        id: string;
+        title: string;
+        description: string;
+        listingType: import(".prisma/client").ListingType;
+        city: string;
+        district: string;
+        budgetPerDay: number | null;
+        servicePricePerDay: number | null;
+        serviceUnit: string | null;
+        serviceIcon: string | null;
+        isFeatured: boolean;
+        isActive: boolean;
+        createdAt: Date;
+        updatedAt: Date;
+    }>;
+    create(user: AuthenticatedUser, body: {
+        title?: string;
+        description?: string;
+        city?: string;
+        district?: string;
+        budgetPerDay?: number | string;
+        servicePricePerDay?: number | string;
+        serviceUnit?: string;
+        serviceIcon?: string;
+    }): Promise<{
+        id: string;
+        city: string;
+        district: string;
+        isFeatured: boolean;
+        createdAt: Date;
+        updatedAt: Date;
+        title: string;
+        description: string;
+        publishedByUserId: string;
+        listingType: import(".prisma/client").$Enums.ListingType;
+        budgetPerDay: number | null;
+        servicePricePerDay: number | null;
+        serviceUnit: string | null;
+        serviceIcon: string | null;
+        isActive: boolean;
+        ownerProfileId: string | null;
+        sitterId: string | null;
+    }>;
+    remove(user: AuthenticatedUser, id: string): Promise<void>;
+}

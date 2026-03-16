@@ -1,0 +1,383 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  OWNER
+  SITTER
+}
+
+enum ListingType {
+  OWNER_REQUEST
+  SITTER_SERVICE
+}
+
+enum ApplicationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELLED
+}
+
+enum CommunityListingCategory {
+  ADOPTION
+  FOOD_SUPPORT
+}
+
+enum CommunityListingStatus {
+  OPEN
+  CLOSED
+}
+
+enum CommunityPublisherType {
+  INDIVIDUAL
+  SHELTER
+}
+
+enum CommunityUrgency {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+model User {
+  id                         String                 @id @default(cuid())
+  email                      String                 @unique
+  passwordHash               String
+  expoPushToken              String?
+  role                       UserRole
+  ownerProfile               OwnerProfile?
+  sitterProfile              Sitter?
+  publishedListings          Listing[]              @relation("UserPublishedListings")
+  applications               ListingApplication[]   @relation("UserApplications")
+  publishedCommunityListings CommunityListing[]     @relation("UserPublishedCommunityListings")
+  communityApplications      CommunityApplication[] @relation("UserCommunityApplications")
+  ownerMessageThreads        MessageThread[]        @relation("OwnerMessageThreads")
+  sitterMessageThreads       MessageThread[]        @relation("SitterMessageThreads")
+  sentMessages               Message[]              @relation("UserSentMessages")
+  authoredCareReports        CareReport[]
+  activeLocation             ActiveLocation?
+  createdAt                  DateTime               @default(now())
+  updatedAt                  DateTime               @updatedAt
+
+  @@index([role])
+  @@index([expoPushToken])
+}
+
+// Sitter model
+model Sitter {
+  id               String                  @id @default(cuid())
+  userId           String?                 @unique
+  user             User?                   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  fullName         String
+  city             String
+  district         String
+  about            String                  @default("")
+  yearsExperience  Int                     @default(0)
+  identityVerified Boolean                 @default(false)
+  repeatClientRate Int                     @default(0)
+  galleryImageUrls String[]                @default([])
+  rating           Float
+  reviewCount      Int
+  pricePerDay      Int
+  pricePerHour     Int
+  avatarUrl        String
+  isFeatured       Boolean
+  tags             String[]
+  listings         Listing[]               @relation("SitterListings")
+  availabilityDays SitterAvailabilityDay[]
+  reviews          SitterReview[]
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  @@index([isFeatured])
+  @@index([rating])
+}
+
+// Message Thread model
+model MessageThread {
+  id                String    @id @default(cuid())
+  ownerUserId       String?
+  ownerUser         User?     @relation("OwnerMessageThreads", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  sitterUserId      String?
+  sitterUser        User?     @relation("SitterMessageThreads", fields: [sitterUserId], references: [id], onDelete: SetNull)
+  listingId         String?
+  listing           Listing?  @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  senderName        String
+  avatarUrl         String
+  previewText       String
+  timeLabel         String
+  unreadCount       Int
+  ownerUnreadCount  Int       @default(0)
+  sitterUnreadCount Int       @default(0)
+  isOnline          Boolean
+  isPriority        Boolean
+  lastMessageAt     DateTime  @default(now())
+  messages          Message[]
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([isPriority])
+  @@index([unreadCount])
+  @@index([ownerUserId])
+  @@index([sitterUserId])
+  @@index([lastMessageAt])
+}
+
+model Message {
+  id           String        @id @default(cuid())
+  threadId     String
+  thread       MessageThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  senderUserId String
+  senderUser   User          @relation("UserSentMessages", fields: [senderUserId], references: [id], onDelete: Cascade)
+  body         String
+  readAt       DateTime?
+  createdAt    DateTime      @default(now())
+
+  @@index([threadId, createdAt])
+  @@index([senderUserId])
+}
+
+// Owner Profile model
+model OwnerProfile {
+  id            String    @id @default(cuid())
+  userId        String?   @unique
+  user          User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  fullName      String
+  roleLabel     String
+  district      String
+  city          String
+  avatarUrl     String
+  about         String
+  averageRating Float
+  pets          Pet[]
+  badges        Badge[]
+  reviews       Review[]
+  listings      Listing[] @relation("OwnerListings")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model Listing {
+  id                 String               @id @default(cuid())
+  title              String
+  description        String
+  listingType        ListingType
+  city               String
+  district           String
+  budgetPerDay       Int?
+  servicePricePerDay Int?
+  serviceUnit        String?
+  serviceIcon        String?
+  isFeatured         Boolean              @default(false)
+  isActive           Boolean              @default(true)
+  publishedByUserId  String
+  publishedByUser    User                 @relation("UserPublishedListings", fields: [publishedByUserId], references: [id], onDelete: Cascade)
+  ownerProfileId     String?
+  ownerProfile       OwnerProfile?        @relation("OwnerListings", fields: [ownerProfileId], references: [id], onDelete: SetNull)
+  sitterId           String?
+  sitter             Sitter?              @relation("SitterListings", fields: [sitterId], references: [id], onDelete: SetNull)
+  applications       ListingApplication[]
+  messageThreads     MessageThread[]
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  @@index([listingType])
+  @@index([isFeatured])
+  @@index([isActive])
+  @@index([city])
+  @@index([district])
+  @@index([publishedByUserId])
+}
+
+model SitterReview {
+  id              String   @id @default(cuid())
+  sitterId        String
+  sitter          Sitter   @relation(fields: [sitterId], references: [id], onDelete: Cascade)
+  authorName      String
+  authorAvatarUrl String
+  rating          Int
+  comment         String
+  timeLabel       String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([sitterId])
+}
+
+model ListingApplication {
+  id          String            @id @default(cuid())
+  listingId   String
+  listing     Listing           @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  applicantId String
+  applicant   User              @relation("UserApplications", fields: [applicantId], references: [id], onDelete: Cascade)
+  message     String?
+  startDate   DateTime?
+  endDate     DateTime?
+  careReport  CareReport?
+  status      ApplicationStatus @default(PENDING)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@index([listingId, applicantId])
+  @@index([status])
+  @@index([applicantId])
+  @@index([startDate, endDate])
+}
+
+model CommunityListing {
+  id                 String                   @id @default(cuid())
+  title              String
+  description        String
+  category           CommunityListingCategory
+  status             CommunityListingStatus   @default(OPEN)
+  city               String
+  district           String
+  publisherType      CommunityPublisherType   @default(INDIVIDUAL)
+  organizationName   String?
+  contactPhone       String?
+  imageUrls          String[]                 @default([])
+  animalName         String?
+  animalType         String?
+  breed              String?
+  ageText            String?
+  gender             String?
+  size               String?
+  healthNotes        String?
+  houseRules         String?
+  adoptionNotes      String?
+  quantityNeeded     String?
+  preferredFoodBrand String?
+  supportDetails     String?
+  urgency            CommunityUrgency         @default(MEDIUM)
+  publishedByUserId  String
+  publishedByUser    User                     @relation("UserPublishedCommunityListings", fields: [publishedByUserId], references: [id], onDelete: Cascade)
+  applications       CommunityApplication[]
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  @@index([category])
+  @@index([status])
+  @@index([city])
+  @@index([district])
+  @@index([publisherType])
+  @@index([urgency])
+  @@index([publishedByUserId])
+  @@index([updatedAt])
+}
+
+model CommunityApplication {
+  id              String            @id @default(cuid())
+  listingId       String
+  listing         CommunityListing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  applicantId     String
+  applicant       User              @relation("UserCommunityApplications", fields: [applicantId], references: [id], onDelete: Cascade)
+  message         String?
+  contactPhone    String?
+  offeredQuantity String?
+  status          ApplicationStatus @default(PENDING)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([listingId, applicantId])
+  @@index([status])
+  @@index([applicantId])
+}
+
+model CareReport {
+  id              String             @id @default(cuid())
+  applicationId   String             @unique
+  application     ListingApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  authorSitterId  String
+  authorSitter    User               @relation(fields: [authorSitterId], references: [id], onDelete: Cascade)
+  summary         String
+  mediaUrls       String[]           @default([])
+  feedingNotes    String?
+  activityNotes   String?
+  toiletNotes     String?
+  medicationNotes String?
+  publishedAt     DateTime           @default(now())
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([authorSitterId])
+  @@index([publishedAt])
+}
+
+model SitterAvailabilityDay {
+  id          String   @id @default(cuid())
+  sitterId    String
+  sitter      Sitter   @relation(fields: [sitterId], references: [id], onDelete: Cascade)
+  date        DateTime
+  isAvailable Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([sitterId, date])
+  @@index([date])
+}
+
+model ActiveLocation {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  latitude     Float
+  longitude    Float
+  accuracy     Float?
+  lastSharedAt DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([lastSharedAt])
+}
+
+// Pet model (nested in OwnerProfile)
+model Pet {
+  id        String       @id @default(cuid())
+  name      String
+  breed     String
+  photoUrl  String
+  profileId String
+  profile   OwnerProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@index([profileId])
+}
+
+// Badge model (nested in OwnerProfile)
+model Badge {
+  id        String       @id @default(cuid())
+  title     String
+  icon      String
+  profileId String
+  profile   OwnerProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@index([profileId])
+}
+
+// Review model (nested in OwnerProfile)
+model Review {
+  id              String       @id @default(cuid())
+  authorName      String
+  authorAvatarUrl String
+  rating          Int
+  comment         String
+  profileId       String
+  profile         OwnerProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([profileId])
+}
