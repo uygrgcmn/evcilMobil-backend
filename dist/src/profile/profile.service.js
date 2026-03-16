@@ -11,7 +11,6 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ProfileService = void 0;
 const common_1 = require("@nestjs/common");
-const client_1 = require("@prisma/client");
 const prisma_service_1 = require("../prisma/prisma.service");
 let ProfileService = class ProfileService {
     prisma;
@@ -24,169 +23,157 @@ let ProfileService = class ProfileService {
         reviews: true,
     };
     async getMe(userId) {
+        await this.ensureUserProfiles(userId);
         const user = await this.prisma.user.findUnique({
             where: { id: userId },
-            select: { role: true },
-        });
-        if (!user) {
-            throw new common_1.NotFoundException('User not found');
-        }
-        if (user.role === client_1.UserRole.OWNER) {
-            const profile = await this.prisma.ownerProfile.findUnique({
-                where: { userId },
-                include: this.ownerProfileIncludes,
-            });
-            if (!profile) {
-                throw new common_1.NotFoundException('Profile not found');
-            }
-            return {
-                ...profile,
-                userRole: client_1.UserRole.OWNER,
-                services: [],
-            };
-        }
-        const sitter = await this.prisma.sitter.findUnique({
-            where: { userId },
-            include: {
-                listings: {
-                    where: { isActive: true },
-                    orderBy: [{ isFeatured: 'desc' }, { updatedAt: 'desc' }],
-                    take: 10,
-                    select: {
-                        id: true,
-                        title: true,
-                        description: true,
-                        servicePricePerDay: true,
-                        serviceUnit: true,
-                        serviceIcon: true,
-                    },
+            select: {
+                id: true,
+                email: true,
+                role: true,
+                ownerProfile: {
+                    include: this.ownerProfileIncludes,
                 },
-                reviews: {
-                    orderBy: { createdAt: 'desc' },
-                    take: 10,
-                    select: {
-                        id: true,
-                        authorName: true,
-                        authorAvatarUrl: true,
-                        rating: true,
-                        comment: true,
-                        timeLabel: true,
+                sitterProfile: {
+                    include: {
+                        listings: {
+                            where: { isActive: true },
+                            orderBy: [{ isFeatured: 'desc' }, { updatedAt: 'desc' }],
+                            take: 10,
+                            select: {
+                                id: true,
+                                title: true,
+                                description: true,
+                                servicePricePerDay: true,
+                                serviceUnit: true,
+                                serviceIcon: true,
+                            },
+                        },
+                        reviews: {
+                            orderBy: { createdAt: 'desc' },
+                            take: 10,
+                            select: {
+                                id: true,
+                                authorName: true,
+                                authorAvatarUrl: true,
+                                rating: true,
+                                comment: true,
+                                timeLabel: true,
+                            },
+                        },
                     },
                 },
             },
         });
-        if (!sitter) {
+        if (!user || !user.ownerProfile || !user.sitterProfile) {
             throw new common_1.NotFoundException('Profile not found');
         }
-        return this.mapSitterToProfile(sitter);
+        const ownerProfile = user.ownerProfile;
+        const sitterProfile = user.sitterProfile;
+        const [ownerVerification, sitterVerification] = await Promise.all([
+            this.buildOwnerVerificationSummary(userId, {
+                avatarUrl: ownerProfile.avatarUrl,
+                fullName: ownerProfile.fullName,
+                pets: ownerProfile.pets,
+                reviews: ownerProfile.reviews,
+            }),
+            this.buildSitterVerificationSummary(userId, {
+                avatarUrl: sitterProfile.avatarUrl,
+                identityVerified: sitterProfile.identityVerified,
+                yearsExperience: sitterProfile.yearsExperience,
+                repeatClientRate: sitterProfile.repeatClientRate,
+                reviews: sitterProfile.reviews,
+            }),
+        ]);
+        const verification = this.mergeVerificationSummaries(ownerVerification, sitterVerification);
+        const baseBadges = [
+            ...ownerProfile.badges,
+            ...this.buildSitterBadges(sitterProfile),
+        ];
+        const badges = this.mergeTrustBadges(baseBadges, verification);
+        const services = sitterProfile.listings
+            .filter((listing) => listing.servicePricePerDay !== null)
+            .map((listing) => ({
+            id: listing.id,
+            title: listing.title,
+            description: listing.description,
+            price: listing.servicePricePerDay ?? 0,
+            unit: listing.serviceUnit || '/day',
+            icon: listing.serviceIcon || 'pets',
+        }));
+        const reviews = [
+            ...ownerProfile.reviews.map((review) => ({
+                id: review.id,
+                authorName: review.authorName,
+                authorAvatarUrl: review.authorAvatarUrl,
+                rating: review.rating,
+                comment: review.comment,
+                timeLabel: undefined,
+            })),
+            ...sitterProfile.reviews.map((review) => ({
+                id: review.id,
+                authorName: review.authorName,
+                authorAvatarUrl: review.authorAvatarUrl,
+                rating: review.rating,
+                comment: review.comment,
+                timeLabel: review.timeLabel,
+            })),
+        ];
+        return {
+            id: user.id,
+            userId: user.id,
+            ownerProfileId: ownerProfile.id,
+            sitterProfileId: sitterProfile.id,
+            userRole: user.role,
+            roleLabel: 'EvcilMobil Kullanicisi',
+            fullName: ownerProfile.fullName ||
+                sitterProfile.fullName ||
+                user.email.split('@')[0] ||
+                'Kullanici',
+            district: ownerProfile.district || sitterProfile.district || '',
+            city: ownerProfile.city || sitterProfile.city || '',
+            avatarUrl: ownerProfile.avatarUrl || sitterProfile.avatarUrl || '',
+            about: ownerProfile.about || sitterProfile.about || '',
+            averageRating: sitterProfile.rating > 0 ? sitterProfile.rating : ownerProfile.averageRating,
+            pets: ownerProfile.pets,
+            badges,
+            reviews,
+            yearsExperience: sitterProfile.yearsExperience,
+            identityVerified: sitterProfile.identityVerified,
+            repeatClientRate: sitterProfile.repeatClientRate,
+            verification,
+            verificationLevel: verification.level,
+            tags: sitterProfile.tags,
+            services,
+            galleryImageUrls: sitterProfile.galleryImageUrls ?? [],
+        };
     }
     async updateMyAvatar(userId, avatarUrl) {
-        const user = await this.prisma.user.findUnique({
-            where: { id: userId },
-            select: { role: true },
-        });
-        if (!user) {
-            throw new common_1.NotFoundException('User not found');
-        }
+        await this.ensureUserProfiles(userId);
         const normalizedAvatar = avatarUrl?.trim() ?? '';
-        if (user.role === client_1.UserRole.OWNER) {
-            const profile = await this.prisma.ownerProfile.findUnique({
+        await this.prisma.$transaction([
+            this.prisma.ownerProfile.update({
                 where: { userId },
-                select: { id: true },
-            });
-            if (!profile) {
-                throw new common_1.NotFoundException('Profile not found');
-            }
-            const updatedProfile = await this.prisma.ownerProfile.update({
-                where: { id: profile.id },
                 data: { avatarUrl: normalizedAvatar },
-                include: this.ownerProfileIncludes,
-            });
-            return {
-                ...updatedProfile,
-                userRole: client_1.UserRole.OWNER,
-                services: [],
-            };
-        }
-        const sitter = await this.prisma.sitter.findUnique({
-            where: { userId },
-            select: { id: true },
-        });
-        if (!sitter) {
-            throw new common_1.NotFoundException('Profile not found');
-        }
-        const updatedSitter = await this.prisma.sitter.update({
-            where: { id: sitter.id },
-            data: { avatarUrl: normalizedAvatar },
-            include: {
-                listings: {
-                    where: { isActive: true },
-                    orderBy: [{ isFeatured: 'desc' }, { updatedAt: 'desc' }],
-                    take: 10,
-                    select: {
-                        id: true,
-                        title: true,
-                        description: true,
-                        servicePricePerDay: true,
-                        serviceUnit: true,
-                        serviceIcon: true,
-                    },
-                },
-                reviews: {
-                    orderBy: { createdAt: 'desc' },
-                    take: 10,
-                    select: {
-                        id: true,
-                        authorName: true,
-                        authorAvatarUrl: true,
-                        rating: true,
-                        comment: true,
-                        timeLabel: true,
-                    },
-                },
-            },
-        });
-        return this.mapSitterToProfile(updatedSitter);
+            }),
+            this.prisma.sitter.update({
+                where: { userId },
+                data: { avatarUrl: normalizedAvatar },
+            }),
+        ]);
+        return this.getMe(userId);
     }
     async updateMyProfile(userId, input) {
-        const user = await this.prisma.user.findUnique({
-            where: { id: userId },
-            select: { role: true },
-        });
-        if (!user) {
-            throw new common_1.NotFoundException('User not found');
-        }
+        await this.ensureUserProfiles(userId);
         const trimmed = (v) => v?.trim() || undefined;
         const positiveInt = (v) => v !== undefined ? Math.max(0, Math.floor(Number(v))) : undefined;
-        if (!Number.isFinite(positiveInt(input.yearsExperience) ?? 0)) {
+        if (input.yearsExperience !== undefined && !Number.isFinite(Number(input.yearsExperience))) {
             throw new common_1.BadRequestException('yearsExperience must be a number');
         }
-        if (user.role === client_1.UserRole.OWNER) {
-            const profile = await this.prisma.ownerProfile.findUnique({
-                where: { userId },
-                select: { id: true },
-            });
-            if (!profile) {
-                throw new common_1.NotFoundException('Profile not found');
-            }
-            const updated = await this.prisma.ownerProfile.update({
-                where: { id: profile.id },
-                data: {
-                    fullName: trimmed(input.fullName),
-                    city: trimmed(input.city),
-                    district: trimmed(input.district),
-                    about: input.about !== undefined ? (input.about.trim() ?? '') : undefined,
-                },
-                include: this.ownerProfileIncludes,
-            });
-            return { ...updated, userRole: client_1.UserRole.OWNER, services: [] };
+        if (input.pricePerDay !== undefined && !Number.isFinite(Number(input.pricePerDay))) {
+            throw new common_1.BadRequestException('pricePerDay must be a number');
         }
-        const sitter = await this.prisma.sitter.findUnique({
-            where: { userId },
-            select: { id: true },
-        });
-        if (!sitter) {
-            throw new common_1.NotFoundException('Profile not found');
+        if (input.pricePerHour !== undefined && !Number.isFinite(Number(input.pricePerHour))) {
+            throw new common_1.BadRequestException('pricePerHour must be a number');
         }
         const validTags = ['overnight', 'walking', 'boarding', 'daily-care'];
         const sanitizedTags = input.tags !== undefined
@@ -199,51 +186,37 @@ let ProfileService = class ProfileService {
                 .filter((u) => u.startsWith('https://') || isAllowedDataImage(u))
                 .slice(0, 20)
             : undefined;
-        const updated = await this.prisma.sitter.update({
-            where: { id: sitter.id },
-            data: {
-                fullName: trimmed(input.fullName),
-                city: trimmed(input.city),
-                district: trimmed(input.district),
-                about: input.about !== undefined ? input.about.trim() : undefined,
-                yearsExperience: positiveInt(input.yearsExperience),
-                tags: sanitizedTags,
-                pricePerDay: positiveInt(input.pricePerDay),
-                pricePerHour: positiveInt(input.pricePerHour),
-                galleryImageUrls: sanitizedGallery,
-                isFeatured: true,
-            },
-            include: {
-                listings: {
-                    where: { isActive: true },
-                    orderBy: [{ isFeatured: 'desc' }, { updatedAt: 'desc' }],
-                    take: 10,
-                    select: {
-                        id: true,
-                        title: true,
-                        description: true,
-                        servicePricePerDay: true,
-                        serviceUnit: true,
-                        serviceIcon: true,
-                    },
+        const normalizedAbout = input.about !== undefined ? input.about.trim() : undefined;
+        await this.prisma.$transaction([
+            this.prisma.ownerProfile.update({
+                where: { userId },
+                data: {
+                    fullName: trimmed(input.fullName),
+                    city: trimmed(input.city),
+                    district: trimmed(input.district),
+                    about: normalizedAbout,
                 },
-                reviews: {
-                    orderBy: { createdAt: 'desc' },
-                    take: 10,
-                    select: {
-                        id: true,
-                        authorName: true,
-                        authorAvatarUrl: true,
-                        rating: true,
-                        comment: true,
-                        timeLabel: true,
-                    },
+            }),
+            this.prisma.sitter.update({
+                where: { userId },
+                data: {
+                    fullName: trimmed(input.fullName),
+                    city: trimmed(input.city),
+                    district: trimmed(input.district),
+                    about: normalizedAbout,
+                    yearsExperience: positiveInt(input.yearsExperience),
+                    tags: sanitizedTags,
+                    pricePerDay: positiveInt(input.pricePerDay),
+                    pricePerHour: positiveInt(input.pricePerHour),
+                    galleryImageUrls: sanitizedGallery,
+                    isFeatured: true,
                 },
-            },
-        });
-        return this.mapSitterToProfile(updated);
+            }),
+        ]);
+        return this.getMe(userId);
     }
     async addPet(userId, input) {
+        await this.ensureUserProfiles(userId);
         const profile = await this.prisma.ownerProfile.findUnique({
             where: { userId },
             select: { id: true },
@@ -267,6 +240,7 @@ let ProfileService = class ProfileService {
         });
     }
     async removePet(userId, petId) {
+        await this.ensureUserProfiles(userId);
         const profile = await this.prisma.ownerProfile.findUnique({
             where: { userId },
             select: { id: true },
@@ -283,43 +257,88 @@ let ProfileService = class ProfileService {
         }
         await this.prisma.pet.delete({ where: { id: petId } });
     }
-    mapSitterToProfile(sitter) {
-        return {
-            id: sitter.id,
-            userRole: client_1.UserRole.SITTER,
-            fullName: sitter.fullName,
-            roleLabel: 'Bakici',
-            district: sitter.district,
-            city: sitter.city,
-            avatarUrl: sitter.avatarUrl,
-            about: sitter.about,
-            averageRating: sitter.rating,
-            pets: [],
-            badges: this.buildSitterBadges(sitter),
-            galleryImageUrls: sitter.galleryImageUrls ?? [],
-            reviews: sitter.reviews.map((review) => ({
-                id: review.id,
-                authorName: review.authorName,
-                authorAvatarUrl: review.authorAvatarUrl,
-                rating: review.rating,
-                comment: review.comment,
-                timeLabel: review.timeLabel,
-            })),
-            yearsExperience: sitter.yearsExperience,
-            identityVerified: sitter.identityVerified,
-            repeatClientRate: sitter.repeatClientRate,
-            tags: sitter.tags,
-            services: sitter.listings
-                .filter((listing) => listing.servicePricePerDay !== null)
-                .map((listing) => ({
-                id: listing.id,
-                title: listing.title,
-                description: listing.description,
-                price: listing.servicePricePerDay ?? 0,
-                unit: listing.serviceUnit || '/day',
-                icon: listing.serviceIcon || 'pets',
-            })),
-        };
+    async ensureUserProfiles(userId) {
+        await this.prisma.$transaction(async (tx) => {
+            const user = await tx.user.findUnique({
+                where: { id: userId },
+                select: {
+                    id: true,
+                    email: true,
+                    ownerProfile: {
+                        select: {
+                            id: true,
+                            fullName: true,
+                            city: true,
+                            district: true,
+                            avatarUrl: true,
+                            about: true,
+                            averageRating: true,
+                        },
+                    },
+                    sitterProfile: {
+                        select: {
+                            id: true,
+                            fullName: true,
+                            city: true,
+                            district: true,
+                            avatarUrl: true,
+                            about: true,
+                            rating: true,
+                        },
+                    },
+                },
+            });
+            if (!user) {
+                throw new common_1.NotFoundException('User not found');
+            }
+            if (user.ownerProfile && user.sitterProfile) {
+                return;
+            }
+            const inferredFullName = user.ownerProfile?.fullName ||
+                user.sitterProfile?.fullName ||
+                user.email.split('@')[0] ||
+                'Kullanici';
+            const inferredCity = user.ownerProfile?.city || user.sitterProfile?.city || '';
+            const inferredDistrict = user.ownerProfile?.district || user.sitterProfile?.district || inferredCity;
+            const inferredAvatar = user.ownerProfile?.avatarUrl || user.sitterProfile?.avatarUrl || '';
+            const inferredAbout = user.ownerProfile?.about || user.sitterProfile?.about || '';
+            if (!user.ownerProfile) {
+                await tx.ownerProfile.create({
+                    data: {
+                        userId: user.id,
+                        fullName: inferredFullName,
+                        roleLabel: 'EvcilMobil Kullanicisi',
+                        city: inferredCity,
+                        district: inferredDistrict,
+                        avatarUrl: inferredAvatar,
+                        about: inferredAbout,
+                        averageRating: user.sitterProfile?.rating ?? 0,
+                    },
+                });
+            }
+            if (!user.sitterProfile) {
+                await tx.sitter.create({
+                    data: {
+                        userId: user.id,
+                        fullName: inferredFullName,
+                        city: inferredCity,
+                        district: inferredDistrict,
+                        about: inferredAbout,
+                        yearsExperience: 0,
+                        identityVerified: false,
+                        repeatClientRate: 0,
+                        galleryImageUrls: [],
+                        rating: user.ownerProfile?.averageRating ?? 0,
+                        reviewCount: 0,
+                        pricePerDay: 350,
+                        pricePerHour: 120,
+                        avatarUrl: inferredAvatar,
+                        isFeatured: false,
+                        tags: [],
+                    },
+                });
+            }
+        });
     }
     buildSitterBadges(sitter) {
         const badges = [];
@@ -345,6 +364,114 @@ let ProfileService = class ProfileService {
             });
         }
         return badges;
+    }
+    mergeTrustBadges(badges, verification) {
+        const result = [...badges];
+        const hasBadge = (id) => result.some((badge) => badge.id === id);
+        if (verification.phoneVerified && !hasBadge('phone-verified')) {
+            result.push({
+                id: 'phone-verified',
+                title: 'Telefon Dogrulandi',
+                icon: 'security',
+            });
+        }
+        if (verification.identityVerified && !hasBadge('identity-verified')) {
+            result.push({
+                id: 'identity-verified',
+                title: 'Kimlik Dogrulandi',
+                icon: 'security',
+            });
+        }
+        if (verification.experienceVerified && !hasBadge('experience-verified')) {
+            result.push({
+                id: 'experience-verified',
+                title: 'Deneyim Onayli',
+                icon: 'schedule',
+            });
+        }
+        if (verification.referenceVerified && !hasBadge('reference-verified')) {
+            result.push({
+                id: 'reference-verified',
+                title: 'Referans Onayli',
+                icon: 'favorite',
+            });
+        }
+        return result;
+    }
+    async buildOwnerVerificationSummary(userId, profile) {
+        const phoneVerified = await this.resolvePhoneVerified(userId);
+        const identityVerified = Boolean(profile.avatarUrl?.trim()) && Boolean(profile.fullName?.trim());
+        const experienceVerified = profile.pets.length > 0;
+        const referenceVerified = profile.reviews.length > 0;
+        return this.composeVerificationSummary({
+            phoneVerified,
+            identityVerified,
+            experienceVerified,
+            referenceVerified,
+        });
+    }
+    async buildSitterVerificationSummary(userId, sitter) {
+        const phoneVerified = await this.resolvePhoneVerified(userId);
+        const identityVerified = sitter.identityVerified || Boolean(sitter.avatarUrl?.trim());
+        const experienceVerified = sitter.yearsExperience >= 2;
+        const referenceVerified = sitter.repeatClientRate >= 40 || sitter.reviews.length >= 2;
+        return this.composeVerificationSummary({
+            phoneVerified,
+            identityVerified,
+            experienceVerified,
+            referenceVerified,
+        });
+    }
+    mergeVerificationSummaries(ownerVerification, sitterVerification) {
+        return this.composeVerificationSummary({
+            phoneVerified: ownerVerification.phoneVerified || sitterVerification.phoneVerified,
+            identityVerified: ownerVerification.identityVerified || sitterVerification.identityVerified,
+            experienceVerified: ownerVerification.experienceVerified || sitterVerification.experienceVerified,
+            referenceVerified: ownerVerification.referenceVerified || sitterVerification.referenceVerified,
+        });
+    }
+    async resolvePhoneVerified(userId) {
+        const [publishedWithPhone, applicationWithPhone] = await Promise.all([
+            this.prisma.communityListing.findFirst({
+                where: {
+                    publishedByUserId: userId,
+                    contactPhone: {
+                        not: null,
+                    },
+                },
+                select: { id: true },
+            }),
+            this.prisma.communityApplication.findFirst({
+                where: {
+                    applicantId: userId,
+                    contactPhone: {
+                        not: null,
+                    },
+                },
+                select: { id: true },
+            }),
+        ]);
+        return Boolean(publishedWithPhone || applicationWithPhone);
+    }
+    composeVerificationSummary(input) {
+        const checks = [
+            input.phoneVerified,
+            input.identityVerified,
+            input.experienceVerified,
+            input.referenceVerified,
+        ];
+        const completed = checks.filter(Boolean).length;
+        const score = completed * 25;
+        const level = completed >= 4
+            ? 'HIGH'
+            : completed >= 2
+                ? 'MEDIUM'
+                : 'LOW';
+        return {
+            ...input,
+            score,
+            level,
+        };
     }
 };
 exports.ProfileService = ProfileService;

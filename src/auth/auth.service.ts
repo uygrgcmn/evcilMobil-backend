@@ -51,41 +51,11 @@ export class AuthService {
     const city = (input.city || '').trim();
     const district = (input.district || '').trim();
 
-    if (role === UserRole.OWNER) {
-      await this.prisma.ownerProfile.create({
-        data: {
-          userId: user.id,
-          fullName,
-          roleLabel: 'Hayvan Sahibi',
-          city,
-          district,
-          avatarUrl: '',
-          about: '',
-          averageRating: 0,
-        },
-      });
-    } else {
-      await this.prisma.sitter.create({
-        data: {
-          userId: user.id,
-          fullName,
-          city,
-          district,
-          about: '',
-          yearsExperience: 0,
-          identityVerified: false,
-          repeatClientRate: 0,
-          galleryImageUrls: [],
-          rating: 0,
-          reviewCount: 0,
-          pricePerDay: 350,
-          pricePerHour: 120,
-          avatarUrl: '',
-          isFeatured: false,
-          tags: [],
-        },
-      });
-    }
+    await this.ensureUserProfiles(user.id, {
+      fullName,
+      city,
+      district,
+    });
 
     return this.buildAuthResponse(user);
   }
@@ -111,10 +81,14 @@ export class AuthService {
       throw new UnauthorizedException('E-posta veya şifre hatalı.');
     }
 
+    await this.ensureUserProfiles(user.id);
+
     return this.buildAuthResponse(user);
   }
 
   async me(userId: string) {
+    await this.ensureUserProfiles(userId);
+
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -226,7 +200,7 @@ export class AuthService {
 
   private parseRole(role: string | undefined): UserRole {
     if (!role || typeof role !== 'string') {
-      throw new BadRequestException('Rol zorunludur.');
+      return UserRole.OWNER;
     }
 
     const normalized = role.trim().toUpperCase();
@@ -239,7 +213,119 @@ export class AuthService {
       return UserRole.SITTER;
     }
 
-    throw new BadRequestException('Rol OWNER veya SITTER olmalıdır.');
+    return UserRole.OWNER;
+  }
+
+  private async ensureUserProfiles(
+    userId: string,
+    seed?: {
+      fullName?: string;
+      city?: string;
+      district?: string;
+    },
+  ) {
+    await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          email: true,
+          ownerProfile: {
+            select: {
+              id: true,
+              fullName: true,
+              city: true,
+              district: true,
+              avatarUrl: true,
+              about: true,
+              averageRating: true,
+            },
+          },
+          sitterProfile: {
+            select: {
+              id: true,
+              fullName: true,
+              city: true,
+              district: true,
+              avatarUrl: true,
+              about: true,
+              rating: true,
+              yearsExperience: true,
+              repeatClientRate: true,
+              tags: true,
+              galleryImageUrls: true,
+            },
+          },
+        },
+      });
+
+      if (!user) {
+        throw new NotFoundException('Kullanıcı bulunamadı.');
+      }
+
+      if (user.ownerProfile && user.sitterProfile) {
+        return;
+      }
+
+      const inferredFullName =
+        seed?.fullName?.trim() ||
+        user.ownerProfile?.fullName?.trim() ||
+        user.sitterProfile?.fullName?.trim() ||
+        user.email.split('@')[0] ||
+        'Yeni Kullanici';
+      const inferredCity =
+        seed?.city?.trim() ||
+        user.ownerProfile?.city?.trim() ||
+        user.sitterProfile?.city?.trim() ||
+        '';
+      const inferredDistrict =
+        seed?.district?.trim() ||
+        user.ownerProfile?.district?.trim() ||
+        user.sitterProfile?.district?.trim() ||
+        inferredCity;
+      const inferredAvatar =
+        user.ownerProfile?.avatarUrl?.trim() || user.sitterProfile?.avatarUrl?.trim() || '';
+      const inferredAbout =
+        user.ownerProfile?.about?.trim() || user.sitterProfile?.about?.trim() || '';
+
+      if (!user.ownerProfile) {
+        await tx.ownerProfile.create({
+          data: {
+            userId: user.id,
+            fullName: inferredFullName,
+            roleLabel: 'EvcilMobil Kullanicisi',
+            city: inferredCity,
+            district: inferredDistrict,
+            avatarUrl: inferredAvatar,
+            about: inferredAbout,
+            averageRating: user.sitterProfile?.rating ?? 0,
+          },
+        });
+      }
+
+      if (!user.sitterProfile) {
+        await tx.sitter.create({
+          data: {
+            userId: user.id,
+            fullName: inferredFullName,
+            city: inferredCity,
+            district: inferredDistrict,
+            about: inferredAbout,
+            yearsExperience: 0,
+            identityVerified: false,
+            repeatClientRate: 0,
+            galleryImageUrls: [],
+            rating: user.ownerProfile?.averageRating ?? 0,
+            reviewCount: 0,
+            pricePerDay: 350,
+            pricePerHour: 120,
+            avatarUrl: inferredAvatar,
+            isFeatured: false,
+            tags: [],
+          },
+        });
+      }
+    });
   }
 
   private isExpoPushToken(token: string): boolean {

@@ -130,6 +130,46 @@ export declare class ReservationsService {
             avatarUrl: string;
         };
     }>;
+    createReservationFromThread(user: AuthenticatedUser, threadId: string, input: {
+        startDate?: string;
+        endDate?: string;
+        message?: string;
+    }): Promise<{
+        id: string;
+        listingId: string;
+        listingTitle: string;
+        listingType: import(".prisma/client").$Enums.ListingType;
+        city: string;
+        district: string;
+        listingIsActive: boolean;
+        status: import(".prisma/client").$Enums.ApplicationStatus;
+        message: string | null;
+        startDate: Date | null;
+        endDate: Date | null;
+        careReport: {
+            id: string;
+            authorSitterId: string;
+            summary: string;
+            publishedAt: Date;
+            updatedAt: Date;
+        } | null;
+        createdAt: Date;
+        updatedAt: Date;
+        applicant: {
+            id: string;
+            email: string;
+            role: import(".prisma/client").$Enums.UserRole;
+            fullName: string;
+            avatarUrl: string;
+        };
+        listingOwner: {
+            id: string;
+            email: string;
+            role: import(".prisma/client").$Enums.UserRole;
+            fullName: string;
+            avatarUrl: string;
+        };
+    }>;
     decideReservation(user: AuthenticatedUser, applicationId: string, rawAction?: string): Promise<{
         id: string;
         listingId: string;
@@ -280,7 +320,9 @@ export declare class ReservationsService {
     private normalizeMessage;
     private eachDay;
     private toDayKey;
-    private resolveSitterIdForListing;
+    private resolveSitterIdForReservation;
+    private ensureSitterProfileForUser;
+    private assertThreadListingCompatibility;
     private assertSitterRangeAvailable;
 }
 export {};

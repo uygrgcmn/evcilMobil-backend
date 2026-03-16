@@ -10,50 +10,32 @@ type UpdateProfileInput = {
     pricePerHour?: number;
     galleryImageUrls?: string[];
 };
+type VerificationLevel = 'LOW' | 'MEDIUM' | 'HIGH';
+type VerificationSummary = {
+    phoneVerified: boolean;
+    identityVerified: boolean;
+    experienceVerified: boolean;
+    referenceVerified: boolean;
+    score: number;
+    level: VerificationLevel;
+};
 export declare class ProfileService {
     private readonly prisma;
     constructor(prisma: PrismaService);
     private readonly ownerProfileIncludes;
     getMe(userId: string): Promise<{
         id: string;
-        userRole: "SITTER";
-        fullName: string;
+        userId: string;
+        ownerProfileId: string;
+        sitterProfileId: string;
+        userRole: import(".prisma/client").$Enums.UserRole;
         roleLabel: string;
+        fullName: string;
         district: string;
         city: string;
         avatarUrl: string;
         about: string;
         averageRating: number;
-        pets: never[];
-        badges: {
-            id: string;
-            title: string;
-            icon: "security" | "schedule" | "favorite";
-        }[];
-        galleryImageUrls: string[];
-        reviews: {
-            id: string;
-            authorName: string;
-            authorAvatarUrl: string;
-            rating: number;
-            comment: string;
-            timeLabel: string;
-        }[];
-        yearsExperience: number;
-        identityVerified: boolean;
-        repeatClientRate: number;
-        tags: string[];
-        services: {
-            id: string;
-            title: string;
-            description: string;
-            price: number;
-            unit: string;
-            icon: string;
-        }[];
-    } | {
-        userRole: "OWNER";
-        services: never[];
         pets: {
             id: string;
             createdAt: Date;
@@ -65,74 +47,53 @@ export declare class ProfileService {
         }[];
         badges: {
             id: string;
-            createdAt: Date;
-            updatedAt: Date;
-            profileId: string;
             title: string;
             icon: string;
         }[];
-        reviews: {
+        reviews: ({
             id: string;
-            rating: number;
-            createdAt: Date;
-            updatedAt: Date;
-            profileId: string;
             authorName: string;
             authorAvatarUrl: string;
+            rating: number;
             comment: string;
+            timeLabel: undefined;
+        } | {
+            id: string;
+            authorName: string;
+            authorAvatarUrl: string;
+            rating: number;
+            comment: string;
+            timeLabel: string;
+        })[];
+        yearsExperience: number;
+        identityVerified: boolean;
+        repeatClientRate: number;
+        verification: VerificationSummary;
+        verificationLevel: VerificationLevel;
+        tags: string[];
+        services: {
+            id: string;
+            title: string;
+            description: string;
+            price: number;
+            unit: string;
+            icon: string;
         }[];
-        id: string;
-        fullName: string;
-        city: string;
-        district: string;
-        avatarUrl: string;
-        createdAt: Date;
-        updatedAt: Date;
-        roleLabel: string;
-        about: string;
-        averageRating: number;
-        userId: string | null;
+        galleryImageUrls: string[];
     }>;
     updateMyAvatar(userId: string, avatarUrl: string | null): Promise<{
         id: string;
-        userRole: "SITTER";
-        fullName: string;
+        userId: string;
+        ownerProfileId: string;
+        sitterProfileId: string;
+        userRole: import(".prisma/client").$Enums.UserRole;
         roleLabel: string;
+        fullName: string;
         district: string;
         city: string;
         avatarUrl: string;
         about: string;
         averageRating: number;
-        pets: never[];
-        badges: {
-            id: string;
-            title: string;
-            icon: "security" | "schedule" | "favorite";
-        }[];
-        galleryImageUrls: string[];
-        reviews: {
-            id: string;
-            authorName: string;
-            authorAvatarUrl: string;
-            rating: number;
-            comment: string;
-            timeLabel: string;
-        }[];
-        yearsExperience: number;
-        identityVerified: boolean;
-        repeatClientRate: number;
-        tags: string[];
-        services: {
-            id: string;
-            title: string;
-            description: string;
-            price: number;
-            unit: string;
-            icon: string;
-        }[];
-    } | {
-        userRole: "OWNER";
-        services: never[];
         pets: {
             id: string;
             createdAt: Date;
@@ -144,74 +105,53 @@ export declare class ProfileService {
         }[];
         badges: {
             id: string;
-            createdAt: Date;
-            updatedAt: Date;
-            profileId: string;
             title: string;
             icon: string;
         }[];
-        reviews: {
+        reviews: ({
             id: string;
-            rating: number;
-            createdAt: Date;
-            updatedAt: Date;
-            profileId: string;
             authorName: string;
             authorAvatarUrl: string;
+            rating: number;
             comment: string;
+            timeLabel: undefined;
+        } | {
+            id: string;
+            authorName: string;
+            authorAvatarUrl: string;
+            rating: number;
+            comment: string;
+            timeLabel: string;
+        })[];
+        yearsExperience: number;
+        identityVerified: boolean;
+        repeatClientRate: number;
+        verification: VerificationSummary;
+        verificationLevel: VerificationLevel;
+        tags: string[];
+        services: {
+            id: string;
+            title: string;
+            description: string;
+            price: number;
+            unit: string;
+            icon: string;
         }[];
-        id: string;
-        fullName: string;
-        city: string;
-        district: string;
-        avatarUrl: string;
-        createdAt: Date;
-        updatedAt: Date;
-        roleLabel: string;
-        about: string;
-        averageRating: number;
-        userId: string | null;
+        galleryImageUrls: string[];
     }>;
     updateMyProfile(userId: string, input: UpdateProfileInput): Promise<{
         id: string;
-        userRole: "SITTER";
-        fullName: string;
+        userId: string;
+        ownerProfileId: string;
+        sitterProfileId: string;
+        userRole: import(".prisma/client").$Enums.UserRole;
         roleLabel: string;
+        fullName: string;
         district: string;
         city: string;
         avatarUrl: string;
         about: string;
         averageRating: number;
-        pets: never[];
-        badges: {
-            id: string;
-            title: string;
-            icon: "security" | "schedule" | "favorite";
-        }[];
-        galleryImageUrls: string[];
-        reviews: {
-            id: string;
-            authorName: string;
-            authorAvatarUrl: string;
-            rating: number;
-            comment: string;
-            timeLabel: string;
-        }[];
-        yearsExperience: number;
-        identityVerified: boolean;
-        repeatClientRate: number;
-        tags: string[];
-        services: {
-            id: string;
-            title: string;
-            description: string;
-            price: number;
-            unit: string;
-            icon: string;
-        }[];
-    } | {
-        userRole: "OWNER";
-        services: never[];
         pets: {
             id: string;
             createdAt: Date;
@@ -223,33 +163,39 @@ export declare class ProfileService {
         }[];
         badges: {
             id: string;
-            createdAt: Date;
-            updatedAt: Date;
-            profileId: string;
             title: string;
             icon: string;
         }[];
-        reviews: {
+        reviews: ({
             id: string;
-            rating: number;
-            createdAt: Date;
-            updatedAt: Date;
-            profileId: string;
             authorName: string;
             authorAvatarUrl: string;
+            rating: number;
             comment: string;
+            timeLabel: undefined;
+        } | {
+            id: string;
+            authorName: string;
+            authorAvatarUrl: string;
+            rating: number;
+            comment: string;
+            timeLabel: string;
+        })[];
+        yearsExperience: number;
+        identityVerified: boolean;
+        repeatClientRate: number;
+        verification: VerificationSummary;
+        verificationLevel: VerificationLevel;
+        tags: string[];
+        services: {
+            id: string;
+            title: string;
+            description: string;
+            price: number;
+            unit: string;
+            icon: string;
         }[];
-        id: string;
-        fullName: string;
-        city: string;
-        district: string;
-        avatarUrl: string;
-        createdAt: Date;
-        updatedAt: Date;
-        roleLabel: string;
-        about: string;
-        averageRating: number;
-        userId: string | null;
+        galleryImageUrls: string[];
     }>;
     addPet(userId: string, input: {
         name?: string;
@@ -265,7 +211,13 @@ export declare class ProfileService {
         profileId: string;
     }>;
     removePet(userId: string, petId: string): Promise<void>;
-    private mapSitterToProfile;
+    private ensureUserProfiles;
     private buildSitterBadges;
+    private mergeTrustBadges;
+    private buildOwnerVerificationSummary;
+    private buildSitterVerificationSummary;
+    private mergeVerificationSummaries;
+    private resolvePhoneVerified;
+    private composeVerificationSummary;
 }
 export {};

@@ -31,6 +31,9 @@ let ReservationsController = class ReservationsController {
     async create(user, body) {
         return this.reservationsService.createReservation(user, body);
     }
+    async createFromThread(user, threadId, body) {
+        return this.reservationsService.createReservationFromThread(user, threadId, body);
+    }
     async decide(user, id, body) {
         return this.reservationsService.decideReservation(user, id, body.action);
     }
@@ -75,6 +78,15 @@ __decorate([
     __metadata("design:paramtypes", [Object, Object]),
     __metadata("design:returntype", Promise)
 ], ReservationsController.prototype, "create", null);
+__decorate([
+    (0, common_1.Post)('from-thread/:threadId'),
+    __param(0, (0, current_user_decorator_1.CurrentUser)()),
+    __param(1, (0, common_1.Param)('threadId')),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", Promise)
+], ReservationsController.prototype, "createFromThread", null);
 __decorate([
     (0, common_1.Post)(':id/decision'),
     __param(0, (0, current_user_decorator_1.CurrentUser)()),

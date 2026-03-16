@@ -116,6 +116,46 @@ export declare class ReservationsController {
             avatarUrl: string;
         };
     }>;
+    createFromThread(user: AuthenticatedUser, threadId: string, body: {
+        startDate?: string;
+        endDate?: string;
+        message?: string;
+    }): Promise<{
+        id: string;
+        listingId: string;
+        listingTitle: string;
+        listingType: import(".prisma/client").$Enums.ListingType;
+        city: string;
+        district: string;
+        listingIsActive: boolean;
+        status: import(".prisma/client").$Enums.ApplicationStatus;
+        message: string | null;
+        startDate: Date | null;
+        endDate: Date | null;
+        careReport: {
+            id: string;
+            authorSitterId: string;
+            summary: string;
+            publishedAt: Date;
+            updatedAt: Date;
+        } | null;
+        createdAt: Date;
+        updatedAt: Date;
+        applicant: {
+            id: string;
+            email: string;
+            role: import(".prisma/client").$Enums.UserRole;
+            fullName: string;
+            avatarUrl: string;
+        };
+        listingOwner: {
+            id: string;
+            email: string;
+            role: import(".prisma/client").$Enums.UserRole;
+            fullName: string;
+            avatarUrl: string;
+        };
+    }>;
     decide(user: AuthenticatedUser, id: string, body: {
         action?: string;
     }): Promise<{

@@ -15,6 +15,7 @@ export declare class SittersController {
         avatarUrl: string;
         isFeatured: boolean;
         tags: string[];
+        verificationLevel: "LOW" | "MEDIUM" | "HIGH";
         latitude: number | null;
         longitude: number | null;
         locationAccuracy: number | null;
@@ -25,6 +26,7 @@ export declare class SittersController {
         yearsExperience: number;
         identityVerified: boolean;
         repeatClientRate: number;
+        verificationLevel: "LOW" | "MEDIUM" | "HIGH";
         about: string;
         services: {
             id: string;
@@ -74,6 +76,7 @@ export declare class SittersController {
         avatarUrl: string;
         isFeatured: boolean;
         tags: string[];
+        verificationLevel: "LOW" | "MEDIUM" | "HIGH";
         latitude: number | null;
         longitude: number | null;
         locationAccuracy: number | null;

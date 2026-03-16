@@ -24,6 +24,24 @@ export declare class MessagesController {
         unreadCount: number;
         lastMessageAt: any;
         messages: any;
+        reservationContext: {
+            listingId: any;
+            listingTitle: any;
+            listingType: any;
+            city: any;
+            district: any;
+            listingIsActive: any;
+            latestReservation: {
+                id: any;
+                status: any;
+                startDate: any;
+                endDate: any;
+                applicantId: any;
+                createdAt: any;
+                updatedAt: any;
+            } | null;
+            steps: string[];
+        } | null;
     }>;
     sendMessage(user: AuthenticatedUser, id: string, body: {
         message?: string;

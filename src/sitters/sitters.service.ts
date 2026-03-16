@@ -25,6 +25,8 @@ type SitterServiceItem = {
     icon: string;
 };
 
+type VerificationLevel = 'LOW' | 'MEDIUM' | 'HIGH';
+
 @Injectable()
 export class SittersService {
     constructor(private readonly prisma: PrismaService) { }
@@ -143,6 +145,7 @@ export class SittersService {
             yearsExperience: sitter.yearsExperience,
             identityVerified: sitter.identityVerified,
             repeatClientRate: sitter.repeatClientRate,
+            verificationLevel: this.resolveVerificationLevel(sitter),
             about: sitter.about,
             services,
             gallery: sitter.galleryImageUrls.map((imageUrl, index) => ({
@@ -234,6 +237,9 @@ export class SittersService {
         fullName: string;
         city: string;
         district: string;
+        yearsExperience: number;
+        identityVerified: boolean;
+        repeatClientRate: number;
         rating: number;
         reviewCount: number;
         pricePerDay: number;
@@ -262,10 +268,37 @@ export class SittersService {
             avatarUrl: sitter.avatarUrl,
             isFeatured: sitter.isFeatured,
             tags: sitter.tags,
+            verificationLevel: this.resolveVerificationLevel(sitter),
             latitude: sitter.user?.activeLocation?.latitude ?? null,
             longitude: sitter.user?.activeLocation?.longitude ?? null,
             locationAccuracy: sitter.user?.activeLocation?.accuracy ?? null,
             locationLastSharedAt: sitter.user?.activeLocation?.lastSharedAt ?? null,
         };
+    }
+
+    private resolveVerificationLevel(input: {
+        identityVerified: boolean;
+        yearsExperience: number;
+        reviewCount?: number;
+        repeatClientRate: number;
+        avatarUrl?: string;
+    }): VerificationLevel {
+        const checks = [
+            input.identityVerified || Boolean(input.avatarUrl?.trim()),
+            input.yearsExperience >= 2,
+            (input.reviewCount ?? 0) >= 5 || input.repeatClientRate >= 40,
+        ];
+
+        const passed = checks.filter(Boolean).length;
+
+        if (passed >= 3) {
+            return 'HIGH';
+        }
+
+        if (passed >= 2) {
+            return 'MEDIUM';
+        }
+
+        return 'LOW';
     }
 }

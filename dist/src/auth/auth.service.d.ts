@@ -33,5 +33,6 @@ export declare class AuthService {
     private normalizeEmail;
     private validatePassword;
     private parseRole;
+    private ensureUserProfiles;
     private isExpoPushToken;
 }

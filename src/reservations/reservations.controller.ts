@@ -39,6 +39,20 @@ export class ReservationsController {
         return this.reservationsService.createReservation(user, body);
     }
 
+    @Post('from-thread/:threadId')
+    async createFromThread(
+        @CurrentUser() user: AuthenticatedUser,
+        @Param('threadId') threadId: string,
+        @Body()
+        body: {
+            startDate?: string;
+            endDate?: string;
+            message?: string;
+        },
+    ) {
+        return this.reservationsService.createReservationFromThread(user, threadId, body);
+    }
+
     @Post(':id/decision')
     async decide(
         @CurrentUser() user: AuthenticatedUser,

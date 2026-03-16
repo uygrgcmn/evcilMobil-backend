@@ -10,10 +10,28 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CommunityService = void 0;
-const client_1 = require("@prisma/client");
 const common_1 = require("@nestjs/common");
+const client_1 = require("@prisma/client");
 const prisma_service_1 = require("../prisma/prisma.service");
-const communityListingInclude = {
+const CommunityListingCategory = {
+    ADOPTION: 'ADOPTION',
+    FOOD_SUPPORT: 'FOOD_SUPPORT',
+};
+const CommunityListingStatus = {
+    OPEN: 'OPEN',
+    CLOSED: 'CLOSED',
+};
+const CommunityPublisherType = {
+    INDIVIDUAL: 'INDIVIDUAL',
+    SHELTER: 'SHELTER',
+};
+const CommunityUrgency = {
+    LOW: 'LOW',
+    MEDIUM: 'MEDIUM',
+    HIGH: 'HIGH',
+};
+const DEFAULT_AVATAR = 'https://lh3.googleusercontent.com/aida-public/AB6AXuDThyF0EYnJ3ZnKmYgt4cP42ur-vsIuOdcO17z8lrIN2MDiRZDH0JYyOWw7xh8e85G8xQSaCaKcohWmFezVBQH5KWnSmQzaX8zqD1A7SGvd4wxeabtIq_eXX-ebjqf1lijEJTXz_lHwClK55jBM0nayds8O7NNH7F1VyNH6zVhskiiMffYd71IOrK_FUmvyu6eS4D8mE6GlC3QXlTezuTEjjRBvVeB6LwMxCnBTwOd-PL3oueWzlCRaF2g-9wlfJ7xpu9IM76USpdr4';
+const COMMUNITY_LISTING_INCLUDE = {
     publishedByUser: {
         select: {
             id: true,
@@ -23,12 +41,23 @@ const communityListingInclude = {
                 select: {
                     fullName: true,
                     avatarUrl: true,
+                    _count: {
+                        select: {
+                            pets: true,
+                            reviews: true,
+                        },
+                    },
                 },
             },
             sitterProfile: {
                 select: {
                     fullName: true,
                     avatarUrl: true,
+                    identityVerified: true,
+                    yearsExperience: true,
+                    reviewCount: true,
+                    repeatClientRate: true,
+                    galleryImageUrls: true,
                 },
             },
         },
@@ -40,9 +69,18 @@ const communityListingInclude = {
         },
     },
 };
-const communityApplicationInclude = {
+const COMMUNITY_APPLICATION_INCLUDE = {
     listing: {
-        include: {
+        select: {
+            id: true,
+            title: true,
+            category: true,
+            status: true,
+            city: true,
+            district: true,
+            publisherType: true,
+            organizationName: true,
+            publishedByUserId: true,
             publishedByUser: {
                 select: {
                     id: true,
@@ -90,117 +128,247 @@ let CommunityService = class CommunityService {
         this.prisma = prisma;
     }
     async getFeed(filters) {
-        const category = this.parseCategory(filters.category);
-        const publisherType = this.parsePublisherType(filters.publisherType);
+        const category = this.parseCategory(filters.category, true);
+        const publisherType = this.parsePublisherType(filters.publisherType, true);
         const listings = await this.prisma.communityListing.findMany({
             where: {
                 category: category ?? undefined,
+                status: filters.includeClosed ? undefined : CommunityListingStatus.OPEN,
+                city: this.optionalText(filters.city)
+                    ? { equals: this.optionalText(filters.city), mode: 'insensitive' }
+                    : undefined,
+                district: this.optionalText(filters.district)
+                    ? { equals: this.optionalText(filters.district), mode: 'insensitive' }
+                    : undefined,
                 publisherType: publisherType ?? undefined,
-                city: filters.city?.trim()
-                    ? { equals: filters.city.trim(), mode: 'insensitive' }
-                    : undefined,
-                district: filters.district?.trim()
-                    ? { equals: filters.district.trim(), mode: 'insensitive' }
-                    : undefined,
-                status: filters.includeClosed ? undefined : client_1.CommunityListingStatus.OPEN,
             },
-            include: communityListingInclude,
-            orderBy: [
-                { status: 'asc' },
-                { urgency: 'desc' },
-                { updatedAt: 'desc' },
-            ],
-            take: 50,
+            include: COMMUNITY_LISTING_INCLUDE,
+            orderBy: [{ updatedAt: 'desc' }],
+            take: 100,
         });
-        return listings.map((listing) => this.mapListing(listing));
+        const mapped = listings.map((listing) => this.mapListing(listing));
+        return mapped.sort((a, b) => {
+            if (a.qualityScore !== b.qualityScore) {
+                return b.qualityScore - a.qualityScore;
+            }
+            if (a.pendingApplicationCount !== b.pendingApplicationCount) {
+                return b.pendingApplicationCount - a.pendingApplicationCount;
+            }
+            return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+        });
+    }
+    async getAdoptionFeed(filters = {}) {
+        return this.getFeed({
+            ...filters,
+            category: CommunityListingCategory.ADOPTION,
+        });
+    }
+    async getFoodSupportFeed(filters = {}) {
+        return this.getFeed({
+            ...filters,
+            category: CommunityListingCategory.FOOD_SUPPORT,
+        });
     }
     async getMyListings(user) {
         const listings = await this.prisma.communityListing.findMany({
             where: {
                 publishedByUserId: user.id,
             },
-            include: communityListingInclude,
-            orderBy: [{ status: 'asc' }, { updatedAt: 'desc' }],
+            include: COMMUNITY_LISTING_INCLUDE,
+            orderBy: [{ updatedAt: 'desc' }],
         });
         return listings.map((listing) => this.mapListing(listing));
     }
     async getById(id) {
         const listing = await this.prisma.communityListing.findUnique({
             where: { id },
-            include: communityListingInclude,
+            include: COMMUNITY_LISTING_INCLUDE,
         });
         if (!listing) {
             throw new common_1.NotFoundException('Community listing not found');
         }
         return this.mapListing(listing);
     }
+    async getSitterLeads(listingId, rawLimit) {
+        const listing = await this.prisma.communityListing.findUnique({
+            where: { id: listingId },
+            select: {
+                id: true,
+                city: true,
+                district: true,
+            },
+        });
+        if (!listing) {
+            throw new common_1.NotFoundException('Community listing not found');
+        }
+        let limit = 8;
+        if (rawLimit?.trim()) {
+            const parsed = Number(rawLimit);
+            if (!Number.isFinite(parsed) || parsed < 1 || parsed > 20) {
+                throw new common_1.BadRequestException('limit must be between 1 and 20');
+            }
+            limit = Math.floor(parsed);
+        }
+        const baseInclude = {
+            user: {
+                select: {
+                    id: true,
+                    email: true,
+                    activeLocation: {
+                        select: {
+                            latitude: true,
+                            longitude: true,
+                            accuracy: true,
+                            lastSharedAt: true,
+                        },
+                    },
+                },
+            },
+            listings: {
+                where: {
+                    isActive: true,
+                    listingType: client_1.ListingType.SITTER_SERVICE,
+                },
+                select: {
+                    id: true,
+                    updatedAt: true,
+                },
+                orderBy: {
+                    updatedAt: 'desc',
+                },
+                take: 1,
+            },
+        };
+        const districtSitters = await this.prisma.sitter.findMany({
+            where: {
+                city: {
+                    equals: listing.city,
+                    mode: 'insensitive',
+                },
+                district: {
+                    equals: listing.district,
+                    mode: 'insensitive',
+                },
+            },
+            include: baseInclude,
+            orderBy: [{ isFeatured: 'desc' }, { rating: 'desc' }, { reviewCount: 'desc' }],
+            take: limit,
+        });
+        let sitters = districtSitters;
+        if (sitters.length < limit) {
+            const remaining = limit - sitters.length;
+            const cityFallback = await this.prisma.sitter.findMany({
+                where: {
+                    city: {
+                        equals: listing.city,
+                        mode: 'insensitive',
+                    },
+                    district: {
+                        not: listing.district,
+                    },
+                },
+                include: baseInclude,
+                orderBy: [{ isFeatured: 'desc' }, { rating: 'desc' }, { reviewCount: 'desc' }],
+                take: remaining,
+            });
+            sitters = [...sitters, ...cityFallback];
+        }
+        return {
+            listingId: listing.id,
+            city: listing.city,
+            district: listing.district,
+            sitters: sitters.map((sitter) => ({
+                id: sitter.id,
+                fullName: sitter.fullName,
+                city: sitter.city,
+                district: sitter.district,
+                primaryListingId: sitter.listings[0]?.id ?? null,
+                rating: sitter.rating,
+                reviewCount: sitter.reviewCount,
+                pricePerDay: sitter.pricePerDay,
+                pricePerHour: sitter.pricePerHour,
+                avatarUrl: sitter.avatarUrl,
+                isFeatured: sitter.isFeatured,
+                tags: sitter.tags,
+                verificationLevel: this.resolveSitterVerificationLevel(sitter),
+                latitude: sitter.user?.activeLocation?.latitude ?? null,
+                longitude: sitter.user?.activeLocation?.longitude ?? null,
+                locationAccuracy: sitter.user?.activeLocation?.accuracy ?? null,
+                locationLastSharedAt: sitter.user?.activeLocation?.lastSharedAt ?? null,
+            })),
+        };
+    }
     async createListing(user, input) {
+        const category = this.requireCategory(input.category);
+        const publisherType = this.parsePublisherType(input.publisherType, true) ?? CommunityPublisherType.INDIVIDUAL;
+        const urgency = this.parseUrgency(input.urgency, true) ?? CommunityUrgency.MEDIUM;
         const title = this.validateText(input.title, 'title');
         const description = this.validateText(input.description, 'description');
         const city = this.validateText(input.city, 'city');
         const district = this.validateText(input.district, 'district');
-        const category = this.requireCategory(input.category);
-        const publisherType = this.parsePublisherType(input.publisherType) ?? client_1.CommunityPublisherType.INDIVIDUAL;
-        const organizationName = this.optionalText(input.organizationName, 120);
-        const contactPhone = this.optionalText(input.contactPhone, 32);
-        const urgency = this.parseUrgency(input.urgency) ?? client_1.CommunityUrgency.MEDIUM;
-        const imageUrls = this.normalizeStringArray(input.imageUrls, 'imageUrls', 8, 4000);
-        if (publisherType === client_1.CommunityPublisherType.SHELTER &&
-            !organizationName) {
-            throw new common_1.BadRequestException('organizationName is required for shelters');
+        const imageUrls = this.normalizeStringArray(input.imageUrls);
+        if (description.length < 40) {
+            throw new common_1.BadRequestException('description must be at least 40 characters');
         }
-        const animalName = this.optionalText(input.animalName, 80);
-        const animalType = this.optionalText(input.animalType, 80);
-        const breed = this.optionalText(input.breed, 80);
-        const ageText = this.optionalText(input.ageText, 80);
-        const gender = this.optionalText(input.gender, 40);
-        const size = this.optionalText(input.size, 40);
-        const healthNotes = this.optionalText(input.healthNotes, 600);
-        const houseRules = this.optionalText(input.houseRules, 600);
-        const adoptionNotes = this.optionalText(input.adoptionNotes, 600);
-        const quantityNeeded = this.optionalText(input.quantityNeeded, 120);
-        const preferredFoodBrand = this.optionalText(input.preferredFoodBrand, 120);
-        const supportDetails = this.optionalText(input.supportDetails, 600);
-        if (category === client_1.CommunityListingCategory.ADOPTION) {
-            if (!animalName) {
-                throw new common_1.BadRequestException('animalName is required for adoption listings');
-            }
-            if (!animalType) {
+        if (imageUrls.length === 0) {
+            throw new common_1.BadRequestException('At least one image is required for community listings');
+        }
+        if (publisherType === CommunityPublisherType.SHELTER &&
+            !this.optionalText(input.organizationName)) {
+            throw new common_1.BadRequestException('organizationName is required for SHELTER listings');
+        }
+        if (category === CommunityListingCategory.ADOPTION) {
+            if (!this.optionalText(input.animalType)) {
                 throw new common_1.BadRequestException('animalType is required for adoption listings');
             }
         }
-        if (category === client_1.CommunityListingCategory.FOOD_SUPPORT && !quantityNeeded) {
-            throw new common_1.BadRequestException('quantityNeeded is required for food support listings');
+        if (category === CommunityListingCategory.FOOD_SUPPORT) {
+            if (!this.optionalText(input.quantityNeeded)) {
+                throw new common_1.BadRequestException('quantityNeeded is required for food support listings');
+            }
         }
         const created = await this.prisma.communityListing.create({
             data: {
                 title,
                 description,
                 category,
+                status: CommunityListingStatus.OPEN,
                 city,
                 district,
                 publisherType,
-                organizationName,
-                contactPhone,
+                organizationName: this.optionalText(input.organizationName),
+                contactPhone: this.optionalText(input.contactPhone),
                 imageUrls,
-                animalName,
-                animalType,
-                breed,
-                ageText,
-                gender,
-                size,
-                healthNotes,
-                houseRules,
-                adoptionNotes,
-                quantityNeeded,
-                preferredFoodBrand,
-                supportDetails,
+                animalName: this.optionalText(input.animalName),
+                animalType: this.optionalText(input.animalType),
+                breed: this.optionalText(input.breed),
+                ageText: this.optionalText(input.ageText),
+                gender: this.optionalText(input.gender),
+                size: this.optionalText(input.size),
+                healthNotes: this.optionalText(input.healthNotes),
+                houseRules: this.optionalText(input.houseRules),
+                adoptionNotes: this.optionalText(input.adoptionNotes),
+                quantityNeeded: this.optionalText(input.quantityNeeded),
+                preferredFoodBrand: this.optionalText(input.preferredFoodBrand),
+                supportDetails: this.optionalText(input.supportDetails),
                 urgency,
                 publishedByUserId: user.id,
             },
-            include: communityListingInclude,
+            include: COMMUNITY_LISTING_INCLUDE,
         });
         return this.mapListing(created);
+    }
+    async createAdoptionListing(user, input) {
+        return this.createListing(user, {
+            ...input,
+            category: CommunityListingCategory.ADOPTION,
+        });
+    }
+    async createFoodSupportListing(user, input) {
+        return this.createListing(user, {
+            ...input,
+            category: CommunityListingCategory.FOOD_SUPPORT,
+        });
     }
     async getInbox(user, rawStatus) {
         const status = this.parseStatus(rawStatus);
@@ -211,7 +379,7 @@ let CommunityService = class CommunityService {
                 },
                 status: status ?? undefined,
             },
-            include: communityApplicationInclude,
+            include: COMMUNITY_APPLICATION_INCLUDE,
             orderBy: [{ createdAt: 'desc' }],
         });
         return applications.map((application) => this.mapApplication(application));
@@ -223,21 +391,17 @@ let CommunityService = class CommunityService {
                 applicantId: user.id,
                 status: status ?? undefined,
             },
-            include: communityApplicationInclude,
+            include: COMMUNITY_APPLICATION_INCLUDE,
             orderBy: [{ createdAt: 'desc' }],
         });
         return applications.map((application) => this.mapApplication(application));
     }
     async createApplication(user, input) {
-        if (typeof input.listingId !== 'string' || !input.listingId.trim()) {
-            throw new common_1.BadRequestException('listingId is required');
-        }
-        const listingId = input.listingId.trim();
+        const listingId = this.validateText(input.listingId, 'listingId');
         const listing = await this.prisma.communityListing.findUnique({
             where: { id: listingId },
             select: {
                 id: true,
-                title: true,
                 category: true,
                 status: true,
                 publishedByUserId: true,
@@ -246,15 +410,15 @@ let CommunityService = class CommunityService {
         if (!listing) {
             throw new common_1.NotFoundException('Community listing not found');
         }
-        if (listing.status !== client_1.CommunityListingStatus.OPEN) {
+        if (listing.status !== CommunityListingStatus.OPEN) {
             throw new common_1.BadRequestException('Listing is closed');
         }
         if (listing.publishedByUserId === user.id) {
             throw new common_1.BadRequestException('You cannot apply to your own listing');
         }
-        const existingActiveApplication = await this.prisma.communityApplication.findFirst({
+        const existing = await this.prisma.communityApplication.findFirst({
             where: {
-                listingId: listing.id,
+                listingId,
                 applicantId: user.id,
                 status: {
                     in: [client_1.ApplicationStatus.PENDING, client_1.ApplicationStatus.ACCEPTED],
@@ -262,18 +426,22 @@ let CommunityService = class CommunityService {
             },
             select: { id: true },
         });
-        if (existingActiveApplication) {
+        if (existing) {
             throw new common_1.BadRequestException('You already have an active application for this listing');
+        }
+        if (listing.category === CommunityListingCategory.FOOD_SUPPORT &&
+            !this.optionalText(input.offeredQuantity)) {
+            throw new common_1.BadRequestException('offeredQuantity is required for food support applications');
         }
         const created = await this.prisma.communityApplication.create({
             data: {
-                listingId: listing.id,
+                listingId,
                 applicantId: user.id,
-                message: this.optionalText(input.message, 800),
-                contactPhone: this.optionalText(input.contactPhone, 32),
-                offeredQuantity: this.optionalText(input.offeredQuantity, 120),
+                message: this.optionalText(input.message),
+                contactPhone: this.optionalText(input.contactPhone),
+                offeredQuantity: this.optionalText(input.offeredQuantity),
             },
-            include: communityApplicationInclude,
+            include: COMMUNITY_APPLICATION_INCLUDE,
         });
         return this.mapApplication(created);
     }
@@ -281,13 +449,13 @@ let CommunityService = class CommunityService {
         const action = this.parseDecision(rawAction);
         const application = await this.prisma.communityApplication.findUnique({
             where: { id: applicationId },
-            include: communityApplicationInclude,
+            include: COMMUNITY_APPLICATION_INCLUDE,
         });
         if (!application) {
             throw new common_1.NotFoundException('Community application not found');
         }
         if (application.listing.publishedByUserId !== user.id) {
-            throw new common_1.ForbiddenException('Only listing publisher can decide this application');
+            throw new common_1.ForbiddenException('Only listing owner can decide this application');
         }
         if (application.status !== client_1.ApplicationStatus.PENDING) {
             throw new common_1.BadRequestException('Only pending applications can be decided');
@@ -296,27 +464,17 @@ let CommunityService = class CommunityService {
             const rejected = await this.prisma.communityApplication.update({
                 where: { id: application.id },
                 data: { status: client_1.ApplicationStatus.REJECTED },
-                include: communityApplicationInclude,
+                include: COMMUNITY_APPLICATION_INCLUDE,
             });
             return this.mapApplication(rejected);
         }
         await this.prisma.$transaction(async (tx) => {
-            const acceptedForListing = await tx.communityApplication.findFirst({
-                where: {
-                    listingId: application.listingId,
-                    status: client_1.ApplicationStatus.ACCEPTED,
-                    id: { not: application.id },
-                },
-                select: { id: true },
-            });
-            if (acceptedForListing) {
-                throw new common_1.BadRequestException('Another application is already accepted for this listing');
-            }
-            await tx.communityApplication.update({
+            const transaction = tx;
+            await transaction.communityApplication.update({
                 where: { id: application.id },
                 data: { status: client_1.ApplicationStatus.ACCEPTED },
             });
-            await tx.communityApplication.updateMany({
+            await transaction.communityApplication.updateMany({
                 where: {
                     listingId: application.listingId,
                     id: { not: application.id },
@@ -324,14 +482,14 @@ let CommunityService = class CommunityService {
                 },
                 data: { status: client_1.ApplicationStatus.REJECTED },
             });
-            await tx.communityListing.update({
+            await transaction.communityListing.update({
                 where: { id: application.listingId },
-                data: { status: client_1.CommunityListingStatus.CLOSED },
+                data: { status: CommunityListingStatus.CLOSED },
             });
         });
         const updated = await this.prisma.communityApplication.findUnique({
             where: { id: application.id },
-            include: communityApplicationInclude,
+            include: COMMUNITY_APPLICATION_INCLUDE,
         });
         if (!updated) {
             throw new common_1.NotFoundException('Community application not found after update');
@@ -341,14 +499,14 @@ let CommunityService = class CommunityService {
     async cancelApplication(user, applicationId) {
         const application = await this.prisma.communityApplication.findUnique({
             where: { id: applicationId },
-            include: communityApplicationInclude,
+            include: COMMUNITY_APPLICATION_INCLUDE,
         });
         if (!application) {
             throw new common_1.NotFoundException('Community application not found');
         }
         const isApplicant = application.applicantId === user.id;
-        const isPublisher = application.listing.publishedByUserId === user.id;
-        if (!isApplicant && !isPublisher) {
+        const isListingOwner = application.listing.publishedByUserId === user.id;
+        if (!isApplicant && !isListingOwner) {
             throw new common_1.ForbiddenException('Not allowed to cancel this application');
         }
         if (application.status === client_1.ApplicationStatus.CANCELLED ||
@@ -356,12 +514,13 @@ let CommunityService = class CommunityService {
             throw new common_1.BadRequestException('Application is already closed');
         }
         await this.prisma.$transaction(async (tx) => {
-            await tx.communityApplication.update({
+            const transaction = tx;
+            await transaction.communityApplication.update({
                 where: { id: application.id },
                 data: { status: client_1.ApplicationStatus.CANCELLED },
             });
             if (application.status === client_1.ApplicationStatus.ACCEPTED) {
-                const remainingAccepted = await tx.communityApplication.count({
+                const remainingAccepted = await transaction.communityApplication.count({
                     where: {
                         listingId: application.listingId,
                         status: client_1.ApplicationStatus.ACCEPTED,
@@ -369,16 +528,16 @@ let CommunityService = class CommunityService {
                     },
                 });
                 if (remainingAccepted === 0) {
-                    await tx.communityListing.update({
+                    await transaction.communityListing.update({
                         where: { id: application.listingId },
-                        data: { status: client_1.CommunityListingStatus.OPEN },
+                        data: { status: CommunityListingStatus.OPEN },
                     });
                 }
             }
         });
         const updated = await this.prisma.communityApplication.findUnique({
             where: { id: application.id },
-            include: communityApplicationInclude,
+            include: COMMUNITY_APPLICATION_INCLUDE,
         });
         if (!updated) {
             throw new common_1.NotFoundException('Community application not found after cancel');
@@ -386,8 +545,9 @@ let CommunityService = class CommunityService {
         return this.mapApplication(updated);
     }
     mapListing(listing) {
-        const pendingApplicationCount = listing.applications.filter((application) => application.status === client_1.ApplicationStatus.PENDING).length;
-        const acceptedApplication = listing.applications.find((application) => application.status === client_1.ApplicationStatus.ACCEPTED);
+        const acceptedApplication = listing.applications.find((application) => application.status === client_1.ApplicationStatus.ACCEPTED) ?? null;
+        const verificationLevel = this.resolvePublisherVerificationLevel(listing.publishedByUser);
+        const quality = this.computeCommunityQuality(listing, verificationLevel);
         return {
             id: listing.id,
             title: listing.title,
@@ -414,8 +574,12 @@ let CommunityService = class CommunityService {
             supportDetails: listing.supportDetails,
             urgency: listing.urgency,
             applicationCount: listing.applications.length,
-            pendingApplicationCount,
+            pendingApplicationCount: listing.applications.filter((application) => application.status === client_1.ApplicationStatus.PENDING).length,
             acceptedApplicationId: acceptedApplication?.id ?? null,
+            publisherVerificationLevel: verificationLevel,
+            qualityScore: quality.score,
+            qualityTier: quality.tier,
+            qualityReasons: quality.reasons,
             createdAt: listing.createdAt,
             updatedAt: listing.updatedAt,
             publishedByUser: {
@@ -430,7 +594,7 @@ let CommunityService = class CommunityService {
     mapApplication(application) {
         return {
             id: application.id,
-            listingId: application.listing.id,
+            listingId: application.listingId,
             listingTitle: application.listing.title,
             listingCategory: application.listing.category,
             listingStatus: application.listing.status,
@@ -461,89 +625,231 @@ let CommunityService = class CommunityService {
         };
     }
     getUserDisplayName(user) {
-        return (user.ownerProfile?.fullName ||
-            user.sitterProfile?.fullName ||
-            user.email.split('@')[0] ||
-            'User');
+        const profileName = user.ownerProfile?.fullName ?? user.sitterProfile?.fullName ?? null;
+        if (profileName && profileName.trim()) {
+            return profileName.trim();
+        }
+        const emailPrefix = user.email.split('@')[0] ?? user.email;
+        return emailPrefix || 'Kullanici';
     }
     getUserAvatar(user) {
-        return user.ownerProfile?.avatarUrl || user.sitterProfile?.avatarUrl || '';
+        const avatar = user.ownerProfile?.avatarUrl ?? user.sitterProfile?.avatarUrl ?? null;
+        if (avatar && avatar.trim()) {
+            return avatar.trim();
+        }
+        return DEFAULT_AVATAR;
     }
-    requireCategory(raw) {
-        const category = this.parseCategory(raw);
+    resolvePublisherVerificationLevel(publisher) {
+        const sitter = publisher.sitterProfile;
+        const owner = publisher.ownerProfile;
+        const phoneVerified = Boolean(sitter?.avatarUrl?.trim() || owner?.avatarUrl?.trim());
+        const identityVerified = Boolean(sitter?.identityVerified || sitter?.avatarUrl?.trim() || owner?.avatarUrl?.trim());
+        const experienceVerified = sitter
+            ? sitter.yearsExperience >= 2
+            : (owner?._count.pets ?? 0) > 0;
+        const referenceVerified = sitter
+            ? sitter.reviewCount >= 5 || sitter.repeatClientRate >= 40
+            : (owner?._count.reviews ?? 0) > 0;
+        const checks = [phoneVerified, identityVerified, experienceVerified, referenceVerified];
+        const passed = checks.filter(Boolean).length;
+        if (passed >= 4) {
+            return 'HIGH';
+        }
+        if (passed >= 2) {
+            return 'MEDIUM';
+        }
+        return 'LOW';
+    }
+    resolveSitterVerificationLevel(input) {
+        const checks = [
+            input.identityVerified || Boolean(input.avatarUrl?.trim()),
+            input.yearsExperience >= 2,
+            input.reviewCount >= 5 || input.repeatClientRate >= 40,
+        ];
+        const passed = checks.filter(Boolean).length;
+        if (passed >= 3) {
+            return 'HIGH';
+        }
+        if (passed >= 2) {
+            return 'MEDIUM';
+        }
+        return 'LOW';
+    }
+    computeCommunityQuality(listing, verificationLevel) {
+        let score = 0;
+        const reasons = [];
+        if (listing.title.trim().length >= 10) {
+            score += 14;
+        }
+        else {
+            score += 6;
+            reasons.push('Baslik daha acik yazilmali.');
+        }
+        if (listing.description.trim().length >= 90) {
+            score += 30;
+        }
+        else if (listing.description.trim().length >= 40) {
+            score += 20;
+        }
+        else {
+            score += 8;
+            reasons.push('Aciklama daha detayli olmali (min 40 karakter).');
+        }
+        if (listing.imageUrls.length >= 3) {
+            score += 20;
+        }
+        else if (listing.imageUrls.length > 0) {
+            score += 12;
+            reasons.push('Daha fazla gorsel guveni arttirir.');
+        }
+        else {
+            reasons.push('En az bir gorsel eklenmeli.');
+        }
+        if (listing.city.trim() && listing.district.trim()) {
+            score += 8;
+        }
+        if (listing.contactPhone?.trim()) {
+            score += 10;
+        }
+        else {
+            reasons.push('Iletisim telefonu eklemek donusumu artirir.');
+        }
+        if (listing.publisherType === CommunityPublisherType.SHELTER) {
+            if (listing.organizationName?.trim()) {
+                score += 8;
+            }
+            else {
+                reasons.push('Kurum adi belirtilmeli.');
+            }
+        }
+        if (listing.category === CommunityListingCategory.ADOPTION) {
+            if (listing.animalType?.trim()) {
+                score += 4;
+            }
+            if (listing.animalName?.trim()) {
+                score += 4;
+            }
+            if (listing.healthNotes?.trim()) {
+                score += 4;
+            }
+            if (listing.houseRules?.trim()) {
+                score += 4;
+            }
+        }
+        if (listing.category === CommunityListingCategory.FOOD_SUPPORT) {
+            if (listing.quantityNeeded?.trim()) {
+                score += 5;
+            }
+            if (listing.preferredFoodBrand?.trim()) {
+                score += 3;
+            }
+            if (listing.supportDetails?.trim()) {
+                score += 4;
+            }
+        }
+        if (verificationLevel === 'HIGH') {
+            score += 16;
+        }
+        else if (verificationLevel === 'MEDIUM') {
+            score += 10;
+        }
+        else {
+            score += 5;
+        }
+        if (listing.status === CommunityListingStatus.OPEN) {
+            score += 3;
+        }
+        const normalized = Math.min(100, score);
+        return {
+            score: normalized,
+            tier: this.toCommunityQualityTier(normalized),
+            reasons: reasons.slice(0, 4),
+        };
+    }
+    toCommunityQualityTier(score) {
+        if (score >= 75) {
+            return 'HIGH';
+        }
+        if (score >= 50) {
+            return 'MEDIUM';
+        }
+        return 'LOW';
+    }
+    requireCategory(rawCategory) {
+        const category = this.parseCategory(rawCategory, false);
         if (!category) {
             throw new common_1.BadRequestException('category is required');
         }
         return category;
     }
-    parseCategory(raw) {
-        const normalized = raw?.trim().toUpperCase();
-        if (!normalized) {
-            return null;
+    parseCategory(rawCategory, allowEmpty = false) {
+        if (!rawCategory) {
+            if (allowEmpty) {
+                return null;
+            }
+            throw new common_1.BadRequestException('category is required');
         }
-        if (normalized === 'ADOPTION') {
-            return client_1.CommunityListingCategory.ADOPTION;
+        const normalized = rawCategory.trim().toUpperCase();
+        if (normalized === CommunityListingCategory.ADOPTION) {
+            return CommunityListingCategory.ADOPTION;
         }
-        if (normalized === 'FOOD_SUPPORT') {
-            return client_1.CommunityListingCategory.FOOD_SUPPORT;
+        if (normalized === CommunityListingCategory.FOOD_SUPPORT) {
+            return CommunityListingCategory.FOOD_SUPPORT;
         }
-        throw new common_1.BadRequestException('Invalid community category');
+        throw new common_1.BadRequestException('category must be ADOPTION or FOOD_SUPPORT');
     }
-    parsePublisherType(raw) {
-        const normalized = raw?.trim().toUpperCase();
-        if (!normalized) {
-            return null;
+    parsePublisherType(rawPublisherType, allowEmpty = false) {
+        if (!rawPublisherType) {
+            return allowEmpty ? null : CommunityPublisherType.INDIVIDUAL;
         }
-        if (normalized === 'INDIVIDUAL') {
-            return client_1.CommunityPublisherType.INDIVIDUAL;
+        const normalized = rawPublisherType.trim().toUpperCase();
+        if (normalized === CommunityPublisherType.INDIVIDUAL) {
+            return CommunityPublisherType.INDIVIDUAL;
         }
-        if (normalized === 'SHELTER') {
-            return client_1.CommunityPublisherType.SHELTER;
+        if (normalized === CommunityPublisherType.SHELTER) {
+            return CommunityPublisherType.SHELTER;
         }
-        throw new common_1.BadRequestException('Invalid community publisher type');
+        throw new common_1.BadRequestException('publisherType must be INDIVIDUAL or SHELTER');
     }
-    parseUrgency(raw) {
-        const normalized = raw?.trim().toUpperCase();
-        if (!normalized) {
-            return null;
+    parseUrgency(rawUrgency, allowEmpty = false) {
+        if (!rawUrgency) {
+            return allowEmpty ? null : CommunityUrgency.MEDIUM;
         }
-        if (normalized === 'LOW') {
-            return client_1.CommunityUrgency.LOW;
+        const normalized = rawUrgency.trim().toUpperCase();
+        if (normalized === CommunityUrgency.LOW) {
+            return CommunityUrgency.LOW;
         }
-        if (normalized === 'MEDIUM') {
-            return client_1.CommunityUrgency.MEDIUM;
+        if (normalized === CommunityUrgency.MEDIUM) {
+            return CommunityUrgency.MEDIUM;
         }
-        if (normalized === 'HIGH') {
-            return client_1.CommunityUrgency.HIGH;
+        if (normalized === CommunityUrgency.HIGH) {
+            return CommunityUrgency.HIGH;
         }
-        throw new common_1.BadRequestException('Invalid community urgency');
+        throw new common_1.BadRequestException('urgency must be LOW, MEDIUM or HIGH');
     }
-    parseStatus(raw) {
-        const normalized = raw?.trim().toUpperCase();
-        if (!normalized) {
+    parseStatus(rawStatus) {
+        if (!rawStatus?.trim()) {
             return null;
         }
-        if (normalized === 'PENDING') {
+        const normalized = rawStatus.trim().toUpperCase();
+        if (normalized === client_1.ApplicationStatus.PENDING) {
             return client_1.ApplicationStatus.PENDING;
         }
-        if (normalized === 'ACCEPTED') {
+        if (normalized === client_1.ApplicationStatus.ACCEPTED) {
             return client_1.ApplicationStatus.ACCEPTED;
         }
-        if (normalized === 'REJECTED') {
+        if (normalized === client_1.ApplicationStatus.REJECTED) {
             return client_1.ApplicationStatus.REJECTED;
         }
-        if (normalized === 'CANCELLED') {
+        if (normalized === client_1.ApplicationStatus.CANCELLED) {
             return client_1.ApplicationStatus.CANCELLED;
         }
-        throw new common_1.BadRequestException('Invalid application status');
+        throw new common_1.BadRequestException('status must be PENDING, ACCEPTED, REJECTED or CANCELLED');
     }
-    parseDecision(raw) {
-        const normalized = raw?.trim().toUpperCase();
-        if (normalized === 'ACCEPT') {
-            return 'ACCEPT';
-        }
-        if (normalized === 'REJECT') {
-            return 'REJECT';
+    parseDecision(rawAction) {
+        const normalized = rawAction?.trim().toUpperCase();
+        if (normalized === 'ACCEPT' || normalized === 'REJECT') {
+            return normalized;
         }
         throw new common_1.BadRequestException('action must be ACCEPT or REJECT');
     }
@@ -553,44 +859,22 @@ let CommunityService = class CommunityService {
         }
         return value.trim();
     }
-    optionalText(value, maxLength) {
-        if (value === undefined || value === null) {
-            return null;
-        }
+    optionalText(value) {
         if (typeof value !== 'string') {
-            throw new common_1.BadRequestException('Expected text value');
+            return null;
         }
         const normalized = value.trim();
-        if (!normalized) {
-            return null;
-        }
-        if (normalized.length > maxLength) {
-            throw new common_1.BadRequestException(`Text value exceeds ${maxLength} characters`);
-        }
-        return normalized;
+        return normalized ? normalized : null;
     }
-    normalizeStringArray(value, field, maxItems, maxItemLength) {
-        if (value === undefined) {
+    normalizeStringArray(value) {
+        if (!Array.isArray(value)) {
             return [];
         }
-        if (!Array.isArray(value)) {
-            throw new common_1.BadRequestException(`${field} must be an array`);
-        }
-        if (value.length > maxItems) {
-            throw new common_1.BadRequestException(`${field} cannot contain more than ${maxItems} items`);
-        }
-        return value
-            .map((item) => {
-            if (typeof item !== 'string') {
-                throw new common_1.BadRequestException(`${field} must contain only strings`);
-            }
-            const normalized = item.trim();
-            if (normalized.length > maxItemLength) {
-                throw new common_1.BadRequestException(`${field} item is too long`);
-            }
-            return normalized;
-        })
-            .filter(Boolean);
+        const normalized = value
+            .filter((item) => typeof item === 'string')
+            .map((item) => item.trim())
+            .filter((item) => Boolean(item));
+        return normalized.slice(0, 12);
     }
 };
 exports.CommunityService = CommunityService;

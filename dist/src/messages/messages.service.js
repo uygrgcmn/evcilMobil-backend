@@ -79,61 +79,100 @@ let MessagesService = class MessagesService {
     async startConversation(user, input) {
         const listingId = this.optionalTrim(input.listingId);
         const initialMessage = this.optionalTrim(input.initialMessage);
+        const requestedSitterId = this.optionalTrim(input.sitterId);
+        const explicitOwnerId = this.optionalTrim(input.ownerId);
         let ownerUserId;
         let sitterUserId;
-        if (user.role === client_1.UserRole.OWNER) {
-            const sitterId = this.optionalTrim(input.sitterId);
-            if (!sitterId) {
-                throw new common_1.BadRequestException('sitterId is required for OWNER conversations');
-            }
-            const sitter = await this.prismaClient.sitter.findUnique({
-                where: { id: sitterId },
-                select: { userId: true },
-            });
-            if (!sitter?.userId) {
-                throw new common_1.NotFoundException('Sitter not found');
-            }
-            ownerUserId = user.id;
-            sitterUserId = sitter.userId;
-        }
-        else {
-            const explicitOwnerId = this.optionalTrim(input.ownerId);
-            if (explicitOwnerId) {
-                ownerUserId = explicitOwnerId;
-            }
-            else if (listingId) {
-                const listing = await this.prismaClient.listing.findUnique({
-                    where: { id: listingId },
-                    select: {
-                        publishedByUserId: true,
-                        publishedByUser: { select: { role: true } },
+        if (listingId) {
+            const listing = await this.prismaClient.listing.findUnique({
+                where: { id: listingId },
+                select: {
+                    id: true,
+                    listingType: true,
+                    publishedByUserId: true,
+                    sitterId: true,
+                    sitter: {
+                        select: { userId: true },
                     },
-                });
-                if (!listing || listing.publishedByUser.role !== client_1.UserRole.OWNER) {
-                    throw new common_1.NotFoundException('Owner listing not found');
-                }
+                },
+            });
+            if (!listing) {
+                throw new common_1.NotFoundException('Listing not found');
+            }
+            if (listing.listingType === client_1.ListingType.OWNER_REQUEST) {
                 ownerUserId = listing.publishedByUserId;
+                if (user.id === ownerUserId) {
+                    const resolvedSitterUserId = await this.resolveSitterUserIdFromInput(requestedSitterId);
+                    if (!resolvedSitterUserId) {
+                        throw new common_1.BadRequestException('sitterId is required for owner-request conversations');
+                    }
+                    sitterUserId = resolvedSitterUserId;
+                }
+                else {
+                    sitterUserId = user.id;
+                }
             }
             else {
-                throw new common_1.BadRequestException('ownerId or listingId is required for SITTER conversations');
+                const listingSitterUserId = listing.sitter?.userId || listing.publishedByUserId;
+                sitterUserId = listingSitterUserId;
+                if (user.id === sitterUserId) {
+                    ownerUserId = explicitOwnerId;
+                    if (!ownerUserId) {
+                        throw new common_1.BadRequestException('ownerId is required for sitter-service conversations');
+                    }
+                }
+                else {
+                    ownerUserId = user.id;
+                }
             }
-            sitterUserId = user.id;
+        }
+        else {
+            const resolvedSitterUserId = await this.resolveSitterUserIdFromInput(requestedSitterId);
+            if (resolvedSitterUserId && explicitOwnerId) {
+                ownerUserId = explicitOwnerId;
+                sitterUserId = resolvedSitterUserId;
+            }
+            else if (resolvedSitterUserId) {
+                ownerUserId = user.id;
+                sitterUserId = resolvedSitterUserId;
+            }
+            else if (explicitOwnerId) {
+                ownerUserId = explicitOwnerId;
+                sitterUserId = user.id;
+            }
+            else {
+                throw new common_1.BadRequestException('listingId, sitterId or ownerId is required');
+            }
+        }
+        if (!ownerUserId || !sitterUserId) {
+            throw new common_1.BadRequestException('Conversation participants could not be resolved');
+        }
+        if (ownerUserId === sitterUserId) {
+            throw new common_1.BadRequestException('Conversation participants must be different users');
         }
         const [ownerUser, sitterUser] = await Promise.all([
             this.prismaClient.user.findUnique({
                 where: { id: ownerUserId },
-                select: { id: true, role: true },
+                select: { id: true },
             }),
             this.prismaClient.user.findUnique({
                 where: { id: sitterUserId },
-                select: { id: true, role: true },
+                select: { id: true },
             }),
         ]);
-        if (!ownerUser || ownerUser.role !== client_1.UserRole.OWNER) {
+        if (!ownerUser) {
             throw new common_1.NotFoundException('Owner user not found');
         }
-        if (!sitterUser || sitterUser.role !== client_1.UserRole.SITTER) {
+        if (!sitterUser) {
             throw new common_1.NotFoundException('Sitter user not found');
+        }
+        if (listingId) {
+            await this.assertListingConversationContext({
+                listingId,
+                ownerUserId,
+                sitterUserId,
+                requestedSitterId,
+            });
         }
         const existingThread = await this.prismaClient.messageThread.findFirst({
             where: {
@@ -146,7 +185,7 @@ let MessagesService = class MessagesService {
         let threadId = existingThread?.id;
         if (!threadId) {
             const counterpart = await this.prismaClient.user.findUnique({
-                where: { id: user.role === client_1.UserRole.OWNER ? sitterUserId : ownerUserId },
+                where: { id: user.id === ownerUserId ? sitterUserId : ownerUserId },
                 select: {
                     email: true,
                     ownerProfile: { select: { fullName: true, avatarUrl: true } },
@@ -210,6 +249,16 @@ let MessagesService = class MessagesService {
                     },
                     orderBy: { createdAt: 'asc' },
                 },
+                listing: {
+                    select: {
+                        id: true,
+                        title: true,
+                        listingType: true,
+                        city: true,
+                        district: true,
+                        isActive: true,
+                    },
+                },
             },
         });
         if (!thread) {
@@ -217,6 +266,27 @@ let MessagesService = class MessagesService {
         }
         await this.markAsRead(thread.id, user.id, thread.ownerUserId, thread.sitterUserId, thread.ownerUnreadCount, thread.sitterUnreadCount);
         const counterpart = this.resolveCounterpart(thread, user.id);
+        const participantIds = [thread.ownerUserId, thread.sitterUserId].filter((participantId) => Boolean(participantId));
+        const latestReservation = thread.listingId
+            ? await this.prismaClient.listingApplication.findFirst({
+                where: {
+                    listingId: thread.listingId,
+                    applicantId: {
+                        in: participantIds,
+                    },
+                },
+                orderBy: [{ createdAt: 'desc' }],
+                select: {
+                    id: true,
+                    status: true,
+                    startDate: true,
+                    endDate: true,
+                    applicantId: true,
+                    createdAt: true,
+                    updatedAt: true,
+                },
+            })
+            : null;
         return {
             id: thread.id,
             counterpart: {
@@ -235,6 +305,31 @@ let MessagesService = class MessagesService {
                 createdAt: message.createdAt,
                 isMine: message.senderUserId === user.id,
             })),
+            reservationContext: thread.listing
+                ? {
+                    listingId: thread.listing.id,
+                    listingTitle: thread.listing.title,
+                    listingType: thread.listing.listingType,
+                    city: thread.listing.city,
+                    district: thread.listing.district,
+                    listingIsActive: thread.listing.isActive,
+                    latestReservation: latestReservation
+                        ? {
+                            id: latestReservation.id,
+                            status: latestReservation.status,
+                            startDate: latestReservation.startDate,
+                            endDate: latestReservation.endDate,
+                            applicantId: latestReservation.applicantId,
+                            createdAt: latestReservation.createdAt,
+                            updatedAt: latestReservation.updatedAt,
+                        }
+                        : null,
+                    steps: [
+                        '1) Tarih araligini sec ve rezervasyon teklifini gonder.',
+                        '2) Ilan sahibi teklifi kabul veya reddet olarak yanitlar.',
+                    ],
+                }
+                : null,
         };
     }
     async sendMessage(user, threadId, rawMessage) {
@@ -515,6 +610,51 @@ let MessagesService = class MessagesService {
             throw new common_1.BadRequestException('Message is too long');
         }
         return message;
+    }
+    async assertListingConversationContext(input) {
+        const listing = await this.prismaClient.listing.findUnique({
+            where: { id: input.listingId },
+            select: {
+                id: true,
+                listingType: true,
+                publishedByUserId: true,
+                sitterId: true,
+                sitter: {
+                    select: { userId: true },
+                },
+            },
+        });
+        if (!listing) {
+            throw new common_1.NotFoundException('Listing not found');
+        }
+        if (listing.listingType === client_1.ListingType.OWNER_REQUEST) {
+            if (listing.publishedByUserId !== input.ownerUserId) {
+                throw new common_1.BadRequestException('listingId is not compatible with selected participants');
+            }
+            if (input.requestedSitterId &&
+                listing.sitterId &&
+                listing.sitterId !== input.requestedSitterId) {
+                throw new common_1.BadRequestException('listingId is not compatible with selected participants');
+            }
+            return;
+        }
+        const listingSitterUserId = listing.sitter?.userId || listing.publishedByUserId;
+        if (listingSitterUserId !== input.sitterUserId) {
+            throw new common_1.BadRequestException('listingId is not compatible with selected participants');
+        }
+    }
+    async resolveSitterUserIdFromInput(sitterId) {
+        if (!sitterId) {
+            return undefined;
+        }
+        const sitter = await this.prismaClient.sitter.findUnique({
+            where: { id: sitterId },
+            select: { userId: true },
+        });
+        if (!sitter?.userId) {
+            throw new common_1.NotFoundException('Sitter not found');
+        }
+        return sitter.userId;
     }
     optionalTrim(value) {
         const trimmed = value?.trim();

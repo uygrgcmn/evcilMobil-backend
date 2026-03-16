@@ -14,6 +14,7 @@ type SitterServiceItem = {
     unit: string;
     icon: string;
 };
+type VerificationLevel = 'LOW' | 'MEDIUM' | 'HIGH';
 export declare class SittersService {
     private readonly prisma;
     constructor(prisma: PrismaService);
@@ -31,6 +32,7 @@ export declare class SittersService {
         avatarUrl: string;
         isFeatured: boolean;
         tags: string[];
+        verificationLevel: VerificationLevel;
         latitude: number | null;
         longitude: number | null;
         locationAccuracy: number | null;
@@ -50,6 +52,7 @@ export declare class SittersService {
         avatarUrl: string;
         isFeatured: boolean;
         tags: string[];
+        verificationLevel: VerificationLevel;
         latitude: number | null;
         longitude: number | null;
         locationAccuracy: number | null;
@@ -69,6 +72,7 @@ export declare class SittersService {
         avatarUrl: string;
         isFeatured: boolean;
         tags: string[];
+        verificationLevel: VerificationLevel;
         latitude: number | null;
         longitude: number | null;
         locationAccuracy: number | null;
@@ -81,6 +85,7 @@ export declare class SittersService {
         yearsExperience: number;
         identityVerified: boolean;
         repeatClientRate: number;
+        verificationLevel: VerificationLevel;
         about: string;
         services: SitterServiceItem[];
         gallery: {
@@ -114,5 +119,6 @@ export declare class SittersService {
     private listSitters;
     private buildDemoUserFilter;
     private mapSitterSummary;
+    private resolveVerificationLevel;
 }
 export {};

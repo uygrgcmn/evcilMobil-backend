@@ -22,16 +22,32 @@ let CommunityController = class CommunityController {
     constructor(communityService) {
         this.communityService = communityService;
     }
-    parseBoolean(value) {
-        return value?.trim().toLowerCase() === 'true';
+    parseIncludeClosed(includeClosed) {
+        return includeClosed?.trim().toLowerCase() === 'true';
     }
-    async list(category, city, district, publisherType, includeClosed) {
+    async feed(category, city, district, publisherType, includeClosed) {
         return this.communityService.getFeed({
             category,
             city,
             district,
             publisherType,
-            includeClosed: this.parseBoolean(includeClosed),
+            includeClosed: this.parseIncludeClosed(includeClosed),
+        });
+    }
+    async adoptions(city, district, publisherType, includeClosed) {
+        return this.communityService.getAdoptionFeed({
+            city,
+            district,
+            publisherType,
+            includeClosed: this.parseIncludeClosed(includeClosed),
+        });
+    }
+    async foodSupport(city, district, publisherType, includeClosed) {
+        return this.communityService.getFoodSupportFeed({
+            city,
+            district,
+            publisherType,
+            includeClosed: this.parseIncludeClosed(includeClosed),
         });
     }
     async mine(user) {
@@ -46,17 +62,26 @@ let CommunityController = class CommunityController {
     async create(user, body) {
         return this.communityService.createListing(user, body);
     }
-    async apply(user, id, body) {
+    async createAdoption(user, body) {
+        return this.communityService.createAdoptionListing(user, body);
+    }
+    async createFoodSupport(user, body) {
+        return this.communityService.createFoodSupportListing(user, body);
+    }
+    async createApplication(user, id, body) {
         return this.communityService.createApplication(user, {
             listingId: id,
             ...body,
         });
     }
-    async decide(user, id, body) {
+    async decideApplication(user, id, body) {
         return this.communityService.decideApplication(user, id, body.action);
     }
-    async cancel(user, id) {
+    async cancelApplication(user, id) {
         return this.communityService.cancelApplication(user, id);
+    }
+    async sitterLeads(id, limit) {
+        return this.communityService.getSitterLeads(id, limit);
     }
     async findOne(id) {
         return this.communityService.getById(id);
@@ -64,7 +89,7 @@ let CommunityController = class CommunityController {
 };
 exports.CommunityController = CommunityController;
 __decorate([
-    (0, common_1.Get)(),
+    (0, common_1.Get)('feed'),
     __param(0, (0, common_1.Query)('category')),
     __param(1, (0, common_1.Query)('city')),
     __param(2, (0, common_1.Query)('district')),
@@ -73,7 +98,27 @@ __decorate([
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [String, String, String, String, String]),
     __metadata("design:returntype", Promise)
-], CommunityController.prototype, "list", null);
+], CommunityController.prototype, "feed", null);
+__decorate([
+    (0, common_1.Get)('adoptions'),
+    __param(0, (0, common_1.Query)('city')),
+    __param(1, (0, common_1.Query)('district')),
+    __param(2, (0, common_1.Query)('publisherType')),
+    __param(3, (0, common_1.Query)('includeClosed')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, String, String]),
+    __metadata("design:returntype", Promise)
+], CommunityController.prototype, "adoptions", null);
+__decorate([
+    (0, common_1.Get)('food-support'),
+    __param(0, (0, common_1.Query)('city')),
+    __param(1, (0, common_1.Query)('district')),
+    __param(2, (0, common_1.Query)('publisherType')),
+    __param(3, (0, common_1.Query)('includeClosed')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, String, String]),
+    __metadata("design:returntype", Promise)
+], CommunityController.prototype, "foodSupport", null);
 __decorate([
     (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
     (0, common_1.Get)('mine'),
@@ -84,7 +129,7 @@ __decorate([
 ], CommunityController.prototype, "mine", null);
 __decorate([
     (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
-    (0, common_1.Get)('inbox'),
+    (0, common_1.Get)('applications/inbox'),
     __param(0, (0, current_user_decorator_1.CurrentUser)()),
     __param(1, (0, common_1.Query)('status')),
     __metadata("design:type", Function),
@@ -93,7 +138,7 @@ __decorate([
 ], CommunityController.prototype, "inbox", null);
 __decorate([
     (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
-    (0, common_1.Get)('outbox'),
+    (0, common_1.Get)('applications/outbox'),
     __param(0, (0, current_user_decorator_1.CurrentUser)()),
     __param(1, (0, common_1.Query)('status')),
     __metadata("design:type", Function),
@@ -111,6 +156,24 @@ __decorate([
 ], CommunityController.prototype, "create", null);
 __decorate([
     (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
+    (0, common_1.Post)('adoptions'),
+    __param(0, (0, current_user_decorator_1.CurrentUser)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
+], CommunityController.prototype, "createAdoption", null);
+__decorate([
+    (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
+    (0, common_1.Post)('food-support'),
+    __param(0, (0, current_user_decorator_1.CurrentUser)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
+], CommunityController.prototype, "createFoodSupport", null);
+__decorate([
+    (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
     (0, common_1.Post)(':id/applications'),
     __param(0, (0, current_user_decorator_1.CurrentUser)()),
     __param(1, (0, common_1.Param)('id')),
@@ -118,7 +181,7 @@ __decorate([
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object, String, Object]),
     __metadata("design:returntype", Promise)
-], CommunityController.prototype, "apply", null);
+], CommunityController.prototype, "createApplication", null);
 __decorate([
     (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
     (0, common_1.Post)('applications/:id/decision'),
@@ -128,7 +191,7 @@ __decorate([
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object, String, Object]),
     __metadata("design:returntype", Promise)
-], CommunityController.prototype, "decide", null);
+], CommunityController.prototype, "decideApplication", null);
 __decorate([
     (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
     (0, common_1.Post)('applications/:id/cancel'),
@@ -137,7 +200,16 @@ __decorate([
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object, String]),
     __metadata("design:returntype", Promise)
-], CommunityController.prototype, "cancel", null);
+], CommunityController.prototype, "cancelApplication", null);
+__decorate([
+    (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
+    (0, common_1.Get)(':id/sitter-leads'),
+    __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, common_1.Query)('limit')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String]),
+    __metadata("design:returntype", Promise)
+], CommunityController.prototype, "sitterLeads", null);
 __decorate([
     (0, common_1.Get)(':id'),
     __param(0, (0, common_1.Param)('id')),

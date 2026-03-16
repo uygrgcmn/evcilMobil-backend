@@ -123,14 +123,6 @@ export class ReservationsService {
             throw new BadRequestException('You cannot reserve your own listing');
         }
 
-        if (listing.listingType === ListingType.OWNER_REQUEST && user.role !== UserRole.SITTER) {
-            throw new BadRequestException('Only sitters can apply owner requests');
-        }
-
-        if (listing.listingType === ListingType.SITTER_SERVICE && user.role !== UserRole.OWNER) {
-            throw new BadRequestException('Only owners can reserve sitter services');
-        }
-
         const startDate = this.parseDay(input.startDate, 'startDate');
         const endDate = this.parseDay(input.endDate, 'endDate');
         this.assertDateRange(startDate, endDate);
@@ -150,7 +142,13 @@ export class ReservationsService {
             throw new BadRequestException('You already have an active reservation for this listing');
         }
 
-        const sitterId = await this.resolveSitterIdForListing(listing.id);
+        const sitterId = await this.resolveSitterIdForReservation({
+            listingId: listing.id,
+            listingType: listing.listingType,
+            publishedByUserId: listing.publishedByUserId,
+            applicantId: user.id,
+            sitterId: listing.sitterId,
+        });
         if (sitterId) {
             await this.assertSitterRangeAvailable(sitterId, startDate, endDate);
         }
@@ -184,6 +182,52 @@ export class ReservationsService {
 
             throw error;
         }
+    }
+
+    async createReservationFromThread(
+        user: AuthenticatedUser,
+        threadId: string,
+        input: {
+            startDate?: string;
+            endDate?: string;
+            message?: string;
+        },
+    ) {
+        const thread = await this.prisma.messageThread.findFirst({
+            where: {
+                id: threadId,
+                OR: [{ ownerUserId: user.id }, { sitterUserId: user.id }],
+            },
+            select: {
+                id: true,
+                listingId: true,
+                ownerUserId: true,
+                sitterUserId: true,
+            },
+        });
+
+        if (!thread) {
+            throw new NotFoundException('Message thread not found');
+        }
+
+        if (!thread.listingId) {
+            throw new BadRequestException('This conversation has no listing context for reservation');
+        }
+
+        await this.assertThreadListingCompatibility(
+            thread.listingId,
+            thread.ownerUserId,
+            thread.sitterUserId,
+        );
+
+        const fallbackMessage = 'Mesajlasma uzerinden rezervasyon teklifi olusturuldu.';
+
+        return this.createReservation(user, {
+            listingId: thread.listingId,
+            startDate: input.startDate,
+            endDate: input.endDate,
+            message: input.message?.trim() || fallbackMessage,
+        });
     }
 
     async decideReservation(user: AuthenticatedUser, applicationId: string, rawAction?: string) {
@@ -223,7 +267,13 @@ export class ReservationsService {
             throw new BadRequestException('Reservation date range is missing');
         }
 
-        const sitterId = await this.resolveSitterIdForListing(application.listingId);
+        const sitterId = await this.resolveSitterIdForReservation({
+            listingId: application.listingId,
+            listingType: application.listing.listingType,
+            publishedByUserId: application.listing.publishedByUserId,
+            applicantId: application.applicantId,
+            sitterId: application.listing.sitterId,
+        });
 
         await this.prisma.$transaction(async (tx) => {
             const acceptedForListing = await tx.listingApplication.findFirst({
@@ -481,10 +531,6 @@ export class ReservationsService {
     }
 
     async setMyAvailability(user: AuthenticatedUser, rawDays: AvailabilityDayInput[]) {
-        if (user.role !== UserRole.SITTER) {
-            throw new ForbiddenException('Only sitters can update availability');
-        }
-
         if (!Array.isArray(rawDays) || rawDays.length === 0) {
             throw new BadRequestException('days[] is required');
         }
@@ -493,14 +539,7 @@ export class ReservationsService {
             throw new BadRequestException('Too many availability updates in one request');
         }
 
-        const sitter = await this.prisma.sitter.findUnique({
-            where: { userId: user.id },
-            select: { id: true },
-        });
-
-        if (!sitter) {
-            throw new NotFoundException('Sitter profile not found');
-        }
+        const sitter = await this.ensureSitterProfileForUser(user.id);
 
         const normalizedDays = rawDays.map((day, index) => {
             const date = this.parseDay(day.date, `days[${index}].date`);
@@ -709,18 +748,11 @@ export class ReservationsService {
                         title: true,
                         listingType: true,
                         publishedByUserId: true,
-                        publishedByUser: {
-                            select: {
-                                id: true,
-                                role: true,
-                            },
-                        },
                     },
                 },
                 applicant: {
                     select: {
                         id: true,
-                        role: true,
                     },
                 },
                 careReport: {
@@ -758,44 +790,34 @@ export class ReservationsService {
 
     private resolveOwnerUserIdForContext(application: {
         listing: {
+            listingType: ListingType;
             publishedByUserId: string;
-            publishedByUser: { role: UserRole };
         };
         applicant: {
             id: string;
-            role: UserRole;
         };
     }) {
-        if (application.listing.publishedByUser.role === UserRole.OWNER) {
+        if (application.listing.listingType === ListingType.OWNER_REQUEST) {
             return application.listing.publishedByUserId;
         }
 
-        if (application.applicant.role === UserRole.OWNER) {
-            return application.applicant.id;
-        }
-
-        return null;
+        return application.applicant.id;
     }
 
     private resolveSitterUserIdForContext(application: {
         listing: {
+            listingType: ListingType;
             publishedByUserId: string;
-            publishedByUser: { role: UserRole };
         };
         applicant: {
             id: string;
-            role: UserRole;
         };
     }) {
-        if (application.listing.publishedByUser.role === UserRole.SITTER) {
+        if (application.listing.listingType === ListingType.SITTER_SERVICE) {
             return application.listing.publishedByUserId;
         }
 
-        if (application.applicant.role === UserRole.SITTER) {
-            return application.applicant.id;
-        }
-
-        return null;
+        return application.applicant.id;
     }
 
     private assertCanReadCareReport(
@@ -824,10 +846,6 @@ export class ReservationsService {
             sitterUserId: string | null;
         },
     ) {
-        if (user.role !== UserRole.SITTER) {
-            return false;
-        }
-
         if (!context.sitterUserId || context.sitterUserId !== user.id) {
             return false;
         }
@@ -847,10 +865,6 @@ export class ReservationsService {
             sitterUserId: string | null;
         },
     ) {
-        if (user.role !== UserRole.SITTER) {
-            throw new ForbiddenException('Only sitters can write care reports');
-        }
-
         if (!context.sitterUserId || context.sitterUserId !== user.id) {
             throw new ForbiddenException('Only assigned sitter can write report');
         }
@@ -1127,34 +1141,108 @@ export class ReservationsService {
         return `${year}-${month}-${day}`;
     }
 
-    private async resolveSitterIdForListing(listingId: string) {
+    private async resolveSitterIdForReservation(input: {
+        listingId: string;
+        listingType: ListingType;
+        publishedByUserId: string;
+        applicantId: string;
+        sitterId?: string | null;
+    }) {
+        if (input.listingType === ListingType.OWNER_REQUEST) {
+            const sitter = await this.ensureSitterProfileForUser(input.applicantId);
+            return sitter.id;
+        }
+
+        if (input.sitterId) {
+            return input.sitterId;
+        }
+
+        const sitter = await this.ensureSitterProfileForUser(input.publishedByUserId);
+        return sitter.id;
+    }
+
+    private async ensureSitterProfileForUser(userId: string) {
+        const existing = await this.prisma.sitter.findUnique({
+            where: { userId },
+            select: { id: true },
+        });
+
+        if (existing) {
+            return existing;
+        }
+
+        const user = await this.prisma.user.findUnique({
+            where: { id: userId },
+            select: {
+                email: true,
+                ownerProfile: {
+                    select: {
+                        fullName: true,
+                        city: true,
+                        district: true,
+                        avatarUrl: true,
+                        about: true,
+                        averageRating: true,
+                    },
+                },
+            },
+        });
+
+        if (!user) {
+            throw new NotFoundException('User not found');
+        }
+
+        return this.prisma.sitter.create({
+            data: {
+                userId,
+                fullName: user.ownerProfile?.fullName || user.email.split('@')[0] || 'Kullanici',
+                city: user.ownerProfile?.city || '',
+                district: user.ownerProfile?.district || user.ownerProfile?.city || '',
+                about: user.ownerProfile?.about || '',
+                yearsExperience: 0,
+                identityVerified: false,
+                repeatClientRate: 0,
+                galleryImageUrls: [],
+                rating: user.ownerProfile?.averageRating ?? 0,
+                reviewCount: 0,
+                pricePerDay: 350,
+                pricePerHour: 120,
+                avatarUrl: user.ownerProfile?.avatarUrl || '',
+                isFeatured: false,
+                tags: [],
+            },
+            select: { id: true },
+        });
+    }
+
+    private async assertThreadListingCompatibility(
+        listingId: string,
+        ownerUserId: string | null,
+        sitterUserId: string | null,
+    ) {
         const listing = await this.prisma.listing.findUnique({
             where: { id: listingId },
             select: {
-                sitterId: true,
-                publishedByUserId: true,
                 listingType: true,
+                publishedByUserId: true,
             },
         });
 
         if (!listing) {
-            return null;
+            throw new NotFoundException('Listing not found');
         }
 
-        if (listing.sitterId) {
-            return listing.sitterId;
+        if (listing.listingType === ListingType.OWNER_REQUEST) {
+            if (!ownerUserId || listing.publishedByUserId !== ownerUserId) {
+                throw new BadRequestException('Thread listing context is inconsistent');
+            }
+
+            return;
         }
 
-        if (listing.listingType !== ListingType.SITTER_SERVICE) {
-            return null;
+        if (!sitterUserId || listing.publishedByUserId !== sitterUserId) {
+            throw new BadRequestException('Thread listing context is inconsistent');
         }
-
-        const sitter = await this.prisma.sitter.findUnique({
-            where: { userId: listing.publishedByUserId },
-            select: { id: true },
-        });
-
-        return sitter?.id ?? null;
     }
 
     private async assertSitterRangeAvailable(

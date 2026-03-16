@@ -123,6 +123,7 @@ let SittersService = class SittersService {
             yearsExperience: sitter.yearsExperience,
             identityVerified: sitter.identityVerified,
             repeatClientRate: sitter.repeatClientRate,
+            verificationLevel: this.resolveVerificationLevel(sitter),
             about: sitter.about,
             services,
             gallery: sitter.galleryImageUrls.map((imageUrl, index) => ({
@@ -213,11 +214,27 @@ let SittersService = class SittersService {
             avatarUrl: sitter.avatarUrl,
             isFeatured: sitter.isFeatured,
             tags: sitter.tags,
+            verificationLevel: this.resolveVerificationLevel(sitter),
             latitude: sitter.user?.activeLocation?.latitude ?? null,
             longitude: sitter.user?.activeLocation?.longitude ?? null,
             locationAccuracy: sitter.user?.activeLocation?.accuracy ?? null,
             locationLastSharedAt: sitter.user?.activeLocation?.lastSharedAt ?? null,
         };
+    }
+    resolveVerificationLevel(input) {
+        const checks = [
+            input.identityVerified || Boolean(input.avatarUrl?.trim()),
+            input.yearsExperience >= 2,
+            (input.reviewCount ?? 0) >= 5 || input.repeatClientRate >= 40,
+        ];
+        const passed = checks.filter(Boolean).length;
+        if (passed >= 3) {
+            return 'HIGH';
+        }
+        if (passed >= 2) {
+            return 'MEDIUM';
+        }
+        return 'LOW';
     }
 };
 exports.SittersService = SittersService;
